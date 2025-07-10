@@ -7,8 +7,8 @@ from aiogram.types import Update
 from handlers import router
 
 # Токен та URL
-TOKEN = "7512193345:AAGWIpOe6ubffmsKOaqiBNc_j2apCEiFk1Y"
-WEBHOOK_URL = "https://my-telegram-bot-2y0s.onrender.com"
+TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
+WEBHOOK_URL = "https://telegram-artist-bot.onrender.com"
 WEBHOOK_PATH = "/webhook/telegram"
 
 # Ініціалізація Bot
@@ -18,7 +18,7 @@ bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 
 # Створюємо Dispatcher
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher(storage=storage)
 
 # Підключаємо router до Dispatcher
 dp.include_router(router)
