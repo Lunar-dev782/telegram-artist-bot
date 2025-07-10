@@ -66,7 +66,5 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"❌ Фатальна помилка: {e}")
     finally:
-        try:
-            asyncio.run(bot.session.close())
-        except Exception as e:
-            logging.warning(f"⚠️ Помилка при закритті сесії бота: {e}")
+        # Закриваємо сесію бота після завершення всіх операцій
+        bot.session.close()  
