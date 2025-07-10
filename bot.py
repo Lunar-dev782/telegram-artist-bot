@@ -1,26 +1,37 @@
-import os  
-import random
-import logging
-import json
-import asyncio
+import os
 import re
 import time
+import json
+import random
+import asyncio
+import logging
 import traceback
-from aiogram import Bot, types
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import Command, StateFilter
+from datetime import datetime, timedelta
+from supabase import create_client, Client
+from aiogram import Bot, Dispatcher, Router, F, types
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
-from aiogram.fsm.storage.memory import MemoryStorage
-from datetime import datetime, timedelta
-from aiogram import Router, Dispatcher
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from supabase import create_client, Client
-from aiogram import F
-from aiogram.types import ContentType
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.filters import Command, StateFilter, CommandStart
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramNotFound,
+    TelegramRetryAfter,
+)
+from aiogram.types import (
+    Message,
+    ContentType,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    error_event,
+)
 from aiogram.types.error_event import ErrorEvent
+
 
 
 TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
