@@ -11,7 +11,10 @@ WEBHOOK_URL = "https://telegram-artist-bot.onrender.com"
 WEBHOOK_PATH = "/webhook/telegram"
 
 # 🤖 Ініціалізація бота
-bot = Bot(token=TOKEN)
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 dp.include_router(router)

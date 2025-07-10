@@ -41,7 +41,11 @@ TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
 ADMIN_CHAT_ID = -1002802098163  # ✅ Не забудь вказати правильний ID
 
 # 🤖 Ініціалізація бота
-bobot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bobot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
