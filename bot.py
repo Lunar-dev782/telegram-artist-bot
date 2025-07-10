@@ -1,49 +1,56 @@
-import os
 import asyncio
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
-from aiogram.types import Message, InputMediaPhoto, FSInputFile
-from supabase import create_client
+import os
 from typing import List
+from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
+from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import (
+    Message,
+    InputMediaPhoto,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
+from supabase import create_client, Client
+from dotenv import load_dotenv  
+
+load_dotenv()
+
 
 # 🔐 Константи
-BOT_TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
-ADMIN_CHAT = -1002802098163
-SUPA_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
-SUPA_KEY = "тут твій service_role ключ"
+TOKEN = os.getenv("TOKEN", "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc")
+ADMIN_CHAT_ID = -1002802098163
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://clbcovdeoahrmxaoijyt.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY")
 
-# ✅ Створення бота правильно для aiogram 3.7+
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# 🤖 Ініціалізація
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+dp.include_router(router)
 
-# 🔗 Підключення до Supabase
-supabase = create_client(SUPA_URL, SUPA_KEY)
-
-# 📋 FSM стани
+# 📋 Стан машини
 class Form(StatesGroup):
     category = State()
     description = State()
     socials = State()
     images = State()
 
-# 🟢 /start хендлер
-@dp.message(CommandStart())
+# 🟢 /start
+@router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
         "🎨 Вітаємо у спільноті!\nОбери категорію:",
-        reply_markup=types.ReplyKeyboardMarkup(
+        reply_markup=ReplyKeyboardMarkup(
             keyboard=[
-                [types.KeyboardButton(text="🐾 Адопти")],
-                [types.KeyboardButton(text="🎨 Коміші / Прайси")],
-                [types.KeyboardButton(text="🧵 Реквести")],
+                [KeyboardButton(text="🐾 Адопти")],
+                [KeyboardButton(text="🎨 Коміші / Прайси")],
+                [KeyboardButton(text="🧵 Реквести")],
             ],
             resize_keyboard=True
         )
@@ -51,28 +58,28 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.set_state(Form.category)
 
 # 🟢 Категорія
-@dp.message(Form.category)
+@router.message(Form.category)
 async def get_category(message: Message, state: FSMContext):
     await state.update_data(category=message.text)
     await message.answer("📝 Опиши пост для публікації (без посилань):")
     await state.set_state(Form.description)
 
 # 🟢 Опис
-@dp.message(Form.description)
+@router.message(Form.description)
 async def get_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await message.answer("🌐 Вкажи соцмережі (формат):\nInstagram: @нік\nTelegram: @нікнейм")
     await state.set_state(Form.socials)
 
 # 🟢 Соцмережі
-@dp.message(Form.socials)
+@router.message(Form.socials)
 async def get_socials(message: Message, state: FSMContext):
     await state.update_data(socials=message.text)
     await message.answer("📸 Надішли до 5 зображень для публікації")
     await state.set_state(Form.images)
 
-# 🟢 Зображення
-@dp.message(Form.images, F.photo)
+# 🟢 Фото
+@router.message(Form.images, F.photo)
 async def get_images(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
@@ -85,8 +92,8 @@ async def get_images(message: Message, state: FSMContext):
         await state.update_data(photos=photos)
         await message.answer(f"Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.")
 
-# ✅ /done — якщо менше ніж 5 зображень
-@dp.message(Form.images, F.text == "/done")
+# ✅ /done
+@router.message(Form.images, F.text == "/done")
 async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
@@ -97,11 +104,10 @@ async def done_images(message: Message, state: FSMContext):
     await finish_submission(message.from_user, state, photos)
 
 # ✅ Фінальна обробка
-async def finish_submission(user, state: FSMContext, photos: List[str]):
+async def finish_submission(user: types.User, state: FSMContext, photos: List[str]):
     data = await state.get_data()
     await state.clear()
 
-    # 📥 Формування заявки
     text = (
         f"📥 <b>Нова заявка від</b> @{user.username or user.first_name}\n"
         f"<b>Категорія:</b> {data['category']}\n"
@@ -109,14 +115,12 @@ async def finish_submission(user, state: FSMContext, photos: List[str]):
         f"<b>Соцмережі:</b>\n{data['socials']}"
     )
 
-    # ⬆️ Відправка в адмін-чат
     media = [InputMediaPhoto(media=photos[0], caption=text)]
     for p in photos[1:]:
         media.append(InputMediaPhoto(media=p))
 
-    await bot.send_media_group(chat_id=ADMIN_CHAT, media=media)
+    await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
 
-    # 💾 Запис у Supabase
     supabase.table("submissions").insert({
         "user_id": user.id,
         "username": user.username,
@@ -126,7 +130,7 @@ async def finish_submission(user, state: FSMContext, photos: List[str]):
         "images": photos,
     }).execute()
 
-# 🟢 Старт бота
+# ▶️ Запуск
 async def main():
     await dp.start_polling(bot)
 

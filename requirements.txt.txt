@@ -1,9 +1,0 @@
-﻿aiogram==3.18.0
-fastapi
-uvicorn
-supabase
-asyncio
-logging
-python-dotenv
-aiohttp>=3.9.0,<3.12
-websockets==10.3
