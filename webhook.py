@@ -2,7 +2,10 @@ import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Update
+from aiogram.types import Update, Message
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties  # ✅ Додано!
+
 from bot import router, TOKEN
 
 # Токен та URL
