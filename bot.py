@@ -1,39 +1,40 @@
+import os  
+import random
+import logging
+import json
 import asyncio
-import os
-from typing import List
-from aiogram import Bot, Dispatcher, Router, types, F
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.client.default import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
+import re
+import time
+import traceback
+from aiogram import Bot, types
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import (
-    Message,
-    InputMediaPhoto,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
+from aiogram.fsm.storage.memory import MemoryStorage
+from datetime import datetime, timedelta
+from aiogram import Router, Dispatcher
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from supabase import create_client, Client
-from dotenv import load_dotenv  
+from aiogram import F
+from aiogram.types import ContentType
+from aiogram.exceptions import TelegramRetryAfter
+from aiogram.types.error_event import ErrorEvent
 
-load_dotenv()
+
+TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
+
+bot = Bot(token=TOKEN)
+storage = MemoryStorage()
+router = Router()  
 
 
-# 🔐 Константи
-TOKEN = os.getenv("TOKEN", "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc")
-ADMIN_CHAT_ID = -1002802098163
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://clbcovdeoahrmxaoijyt.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY")
+# Дані для підключення до Supabase
+SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# 🤖 Ініціалізація
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
-router = Router()
-dp.include_router(router)
-
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 # 📋 Стан машини
 class Form(StatesGroup):
     category = State()
