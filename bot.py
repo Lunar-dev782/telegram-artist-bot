@@ -46,10 +46,9 @@ bobot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 
+bot = Bot(token=TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-router = Router()
-dp.include_router(router)
+router = Router()  
 
 # 🔌 Дані для Supabase
 SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
