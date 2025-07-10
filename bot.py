@@ -41,7 +41,7 @@ TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
 ADMIN_CHAT_ID = -1002802098163  # ✅ Не забудь вказати правильний ID
 
 # 🤖 Ініціалізація бота
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+bobot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
@@ -149,9 +149,10 @@ async def finish_submission(user: types.User, state: FSMContext, photos: List[st
         "images": photos,
     }).execute()
 
-# ▶️ Запуск
+# Запуск бота
 async def main():
-    await dp.start_polling(bot)
+    await router.start_polling(bot)  # Запускаємо polling з router
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())

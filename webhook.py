@@ -1,9 +1,9 @@
-import asyncio
 import logging
 from aiohttp import web
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Update, Message
+from aiogram.types import Update
+from bot import router, TOKEN
 
 # Токен та URL
 TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
@@ -14,6 +14,7 @@ WEBHOOK_PATH = "/webhook/telegram"
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+dp.include_router(router)
 
 # ✅ Простий хендлер — відповідає на всі повідомлення
 @dp.message()
@@ -60,11 +61,8 @@ def main():
     except (KeyboardInterrupt, SystemExit):
         logging.info("🛑 Бот завершив роботу")
 
-if __name__ == "__main__":
+iif __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logging.error(f"❌ Фатальна помилка: {e}")
-    finally:
-        # Закриваємо сесію бота після завершення всіх операцій
-        bot.session.close()  
+        logging.exception("❌ Фатальна помилка:")
