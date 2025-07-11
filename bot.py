@@ -148,6 +148,22 @@ async def handle_category_selection(message: Message, state: FSMContext):
         parse_mode="Markdown"
     )
 
+async def check_subscription(user_id: int, channel_id: str) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        logging.error(f"Помилка перевірки підписки: {e}")
+        return False
+
+@router.message(lambda message: message.text == "Я все зробив(ла)")
+async def confirm_ready(message: Message, state: FSMContext):
+    channel_id = "@channel_link"  # Замініть на ваш канал
+    if not await check_subscription(message.from_user.id, channel_id):
+        await message.answer("⚠️ Підпишись на наш канал перед подачею заявки!")
+        return
+    # Решта коду
+
 # 🟢 Підтвердження виконання умов
 @router.message(lambda message: message.text == "Я все зробив(ла)")
 async def confirm_ready(message: Message, state: FSMContext):
@@ -155,36 +171,52 @@ async def confirm_ready(message: Message, state: FSMContext):
         "📋 Надішли, будь ласка, цю інформацію *одним повідомленням*:\n\n"
         "1. Ім’я / нікнейм\n"
         "2. Короткий опис\n"
-        "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм)\n"
-        "4. Додай до 5 зображень\n\n"
+        "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм)\n\n"
         "📌 Приклад:\n"
         "Нік: @Artist\n"
         "Опис: Продаю персонажа, унікальний дизайн!\n"
-        "Соцмережі: Instagram: @artist, Telegram: @artist\n",
+        "Соцмережі: Instagram: @artist, Telegram: @artist\n\n"
+        "Після цього надішли до 5 зображень.",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
     await state.set_state(Form.description)
 
-# 🟢 Опис
+# 🟢 Опис та соцмережі одним повідомленням
 @router.message(Form.description)
-async def get_description(message: Message, state: FSMContext):
-    await state.update_data(description=message.text)
-    await message.answer(
-        "🌐 Вкажи соцмережі (формат):\n"
-        "Instagram: @нік\n"
-        "Telegram: @нікнейм"
-    )
-    await state.set_state(Form.socials)
+async def get_description_and_socials(message: Message, state: FSMContext):
+    # Перевіряємо, чи повідомлення містить необхідні дані
+    if not message.text or len(message.text.split('\n')) < 3:
+        await message.answer(
+            "⚠️ Будь ласка, надішли всю інформацію одним повідомленням:\n"
+            "1. Ім’я / нікнейм\n"
+            "2. Короткий опис\n"
+            "3. Лінки на соцмережі\n\n"
+            "Спробуй ще раз."
+        )
+        return
 
-# 🟢 Соцмережі
-@router.message(Form.socials)
-async def get_socials(message: Message, state: FSMContext):
-    await state.update_data(socials=message.text)
-    await message.answer("📸 Надішли до 5 зображень для публікації")
-    await state.set_state(Form.images)
+    # Розбиваємо текст на частини
+    try:
+        lines = message.text.split('\n')
+        nickname = lines[0].strip()
+        description = lines[1].strip()
+        socials = '\n'.join(lines[2:]).strip()
 
-# 🟢 Фото
+        await state.update_data(nickname=nickname, description=description, socials=socials)
+        await message.answer("📸 Надішли до 5 зображень для публікації")
+        await state.set_state(Form.images)
+    except Exception as e:
+        logging.error(f"Помилка обробки повідомлення: {e}")
+        await message.answer(
+            "⚠️ Помилка формату повідомлення. Переконайся, що ти надіслав усі дані коректно:\n"
+            "1. Ім’я / нікнейм\n"
+            "2. Короткий опис\n"
+            "3. Лінки на соцмережі\n\n"
+            "Спробуй ще раз."
+        )
+
+# 🟢 Фото (без змін)
 @router.message(Form.images, F.photo)
 async def get_images(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -198,7 +230,7 @@ async def get_images(message: Message, state: FSMContext):
         await state.update_data(photos=photos)
         await message.answer(f"Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.")
 
-# ✅ /done
+# ✅ /done (без змін)
 @router.message(Form.images, F.text == "/done")
 async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -209,7 +241,7 @@ async def done_images(message: Message, state: FSMContext):
     await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos)
 
-# ✅ Фінальна обробка (відправка адмінам)
+# ✅ Фінальна обробка (оновлено для використання нових даних)
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     await state.clear()
@@ -217,8 +249,9 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     text = (
         f"📥 <b>Нова заявка від</b> @{user.username or user.first_name}\n"
         f"<b>Категорія:</b> {data['category']}\n"
-        f"<b>Опис:</b> {data['description']}\n"
-        f"<b>Соцмережі:</b>\n{data['socials']}"
+        f"<b>Нік:</b> {data.get('nickname', 'Невказано')}\n"
+        f"<b>Опис:</b> {data.get('description', 'Невказано')}\n"
+        f"<b>Соцмережі:</b>\n{data.get('socials', 'Невказано')}"
     )
 
     media = [InputMediaPhoto(media=photos[0], caption=text, parse_mode="HTML")]
@@ -230,72 +263,25 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}")
     markup = keyboard.as_markup()
 
-    await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
-    await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
+    try:
+        await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
+        await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
+    except Exception as e:
+        logging.error(f"Помилка надсилання в адмінський чат: {e}")
+        await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам. Зверніться до @AdminUsername.")
+        return
 
     supabase.table("submissions").insert({
         "user_id": user.id,
         "username": user.username or user.first_name,
         "category": data["category"],
-        "description": data["description"],
-        "socials": data["socials"],
+        "nickname": data.get("nickname", ""),
+        "description": data.get("description", ""),
+        "socials": data.get("socials", ""),
         "images": photos,
         "status": "pending",
         "submitted_at": datetime.utcnow().isoformat()
     }).execute()
-
-# 🟢 Схвалення посту та публікація в основний чат
-@router.callback_query(lambda c: c.data.startswith("approve:"))
-async def approve_post(callback: types.CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    
-    # Оновлення статусу в Supabase
-    supabase.table("submissions").update({
-        "status": "approved",
-        "moderated_at": datetime.utcnow().isoformat(),
-        "moderator_id": callback.from_user.id
-    }).eq("user_id", user_id).execute()
-
-    # Отримання даних анкети з Supabase
-    submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("status", "approved").order("submitted_at", desc=True).limit(1).execute()
-    
-    if submission.data:
-        data = submission.data[0]
-        # Форматування поста для основного чату
-        post_text = (
-            f"📢 <b>{data['category']}</b>\n\n"
-            f"{data['description']}\n\n"
-            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
-            f"👤 Від: @{data['username']}\n"
-            f"#public"
-        )
-
-        # Надсилання поста в основний чат
-        media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
-        for photo in data["images"][1:]:
-            media.append(InputMediaPhoto(media=photo))
-
-        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
-
-    # Повідомлення адміну та користувачу
-    await callback.message.edit_text("✅ Публікацію схвалено та опубліковано!")
-    await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
-
-# 🟢 Відхилення посту
-@router.callback_query(lambda c: c.data.startswith("reject:"))
-async def reject_post(callback: types.CallbackQuery):
-    user_id = int(callback.data.split(":")[1])
-    supabase.table("submissions").update({
-        "status": "rejected",
-        "moderated_at": datetime.utcnow().isoformat(),
-        "moderator_id": callback.from_user.id,
-        "rejection_reason": "Невідповідність вимогам"
-    }).eq("user_id", user_id).execute()
-
-    await callback.message.edit_text("❌ Публікацію відхилено.")
-    await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
-
-
 
     # Запуск бота
 async def main():
