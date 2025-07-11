@@ -332,7 +332,7 @@ async def approve_post(callback: types.CallbackQuery):
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result}")
+        logging.info(f"Результат оновлення Supabase: {result.data}")
     except Exception as e:
         logging.error(f"Помилка при оновленні статусу в Supabase: {e}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
@@ -352,13 +352,14 @@ async def approve_post(callback: types.CallbackQuery):
 
         data = submission.data[0]
         media_message_ids = data.get("media_message_ids", [])
+        logging.info(f"media_message_ids: {media_message_ids}")
 
-        # Спроба 1: Пересилання повідомлення
         try:
             if media_message_ids:
                 logging.info(f"Пересилання медіа-групи з адмінського чату {ADMIN_CHAT_ID} в основний чат {MAIN_CHAT_ID}")
                 for message_id in media_message_ids:
-                    await asyncio.sleep(1)  # Затримка для уникнення лімітів
+                    logging.info(f"Пересилання message_id={message_id}")
+                    await asyncio.sleep(1)
                     await bot.forward_message(
                         chat_id=MAIN_CHAT_ID,
                         from_chat_id=ADMIN_CHAT_ID,
@@ -368,7 +369,6 @@ async def approve_post(callback: types.CallbackQuery):
                 raise ValueError("media_message_ids порожній")
         except Exception as e:
             logging.warning(f"Помилка пересилання: {e}. Спроба відправки медіа-групи напряму.")
-            # Спроба 2: Відправка медіа-групи напряму
             post_text = (
                 f"📢 <b>{data['category']}</b>\n\n"
                 f"{data['description']}\n\n"
@@ -423,6 +423,21 @@ async def reject_post(callback: types.CallbackQuery):
         logging.error(f"Помилка при відхиленні заявки: {e}")
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
         await callback.answer()
+
+@router.callback_query()
+async def debug_callback(callback: types.CallbackQuery):
+    logging.info(f"DEBUG: Отримано callback-запит: {callback.data} від адміна {callback.from_user.id}")
+    await callback.answer("Отримано callback, але немає обробника")
+
+@router.message(Command("test_main_chat"))
+async def test_main_chat(message: Message):
+    try:
+        logging.info(f"Тестування доступу до основного чату {MAIN_CHAT_ID}")
+        await bot.send_message(chat_id=MAIN_CHAT_ID, text="Тестове повідомлення від бота")
+        await message.answer("Тестове повідомлення успішно надіслано в основний чат!")
+    except Exception as e:
+        logging.error(f"Помилка тестування основного чату: {e}")
+        await message.answer(f"Помилка: {e}")
 
 # Обробка помилок
 @dp.errors()
