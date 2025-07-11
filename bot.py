@@ -122,6 +122,17 @@ async def cmd_rules(message: Message):
     )
     await message.answer(rules_text)
 
+# 🟢 Тестування основного чату
+@router.message(Command("test_main_chat"))
+async def test_main_chat(message: Message):
+    try:
+        logging.info(f"Тестування доступу до основного чату {MAIN_CHAT_ID}")
+        await bot.send_message(chat_id=MAIN_CHAT_ID, text="Тестове повідомлення від бота")
+        await message.answer("Тестове повідомлення успішно надіслано в основний чат!")
+    except Exception as e:
+        logging.error(f"Помилка тестування основного чату: {e}")
+        await message.answer(f"Помилка: {e}")
+
 # 🟢 Обробка вибору категорії
 @router.message(lambda message: message.text in CATEGORIES)
 async def handle_category_selection(message: Message, state: FSMContext):
@@ -290,30 +301,44 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "submitted_at": datetime.utcnow().isoformat()
         }).execute()
         logging.info(f"Заявка успішно збережена в Supabase")
+        await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
     except Exception as e:
         logging.error(f"Помилка при збереженні в Supabase: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки. Зверніться до @AdminUsername.")
+        return
 
 # 🟢 Схвалення посту та публікація в основний чат
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: types.CallbackQuery):
+    logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     user_id = int(callback.data.split(":")[1])
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}")
-    
+
     try:
-        supabase.table("submissions").update({
+        logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}")
+        result = supabase.table("submissions").update({
             "status": "approved",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id
-        }).eq("user_id", user_id).execute()
+        }).eq("user_id", user_id).eq("status", "pending").execute()
+        logging.info(f"Результат оновлення Supabase: {result}")
     except Exception as e:
         logging.error(f"Помилка при оновленні статусу в Supabase: {e}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
+        await callback.answer()  # Відповідаємо на callback
         return
 
-    submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("status", "approved").order("submitted_at", desc=True).limit(1).execute()
-    
-    if submission.data:
+    try:
+        logging.info(f"Отримання схваленої заявки для user_id={user_id}")
+        submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("status", "approved").order("submitted_at", desc=True).limit(1).execute()
+        logging.info(f"Отримані дані заявки: {submission.data}")
+        
+        if not submission.data:
+            logging.error(f"Не знайдено схваленої заявки для користувача {user_id}")
+            await callback.message.edit_text("⚠️ Не вдалося знайти заявку для публікації.")
+            await callback.answer()
+            return
+
         data = submission.data[0]
         post_text = (
             f"📢 <b>{data['category']}</b>\n\n"
@@ -327,33 +352,47 @@ async def approve_post(callback: types.CallbackQuery):
         for photo in data["images"][1:]:
             media.append(InputMediaPhoto(media=photo))
 
-        try:
-            await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
-            await callback.message.edit_text("✅ Публікацію схвалено та опубліковано!")
-            await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
-        except Exception as e:
-            logging.error(f"Помилка при публікації в основний чат: {e}")
-            await callback.message.edit_text("⚠️ Помилка при публікації в основний чат.")
-            return
+        logging.info(f"Публікація в основний чат {MAIN_CHAT_ID}")
+        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+        await callback.message.edit_text("✅ Публікацію схвалено та опубліковано!")
+        await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
+        await callback.answer()
+    except TelegramBadRequest as e:
+        logging.error(f"Помилка TelegramBadRequest при публікації в основний чат: {e}")
+        await callback.message.edit_text("⚠️ Помилка при публікації в основний чат (BadRequest).")
+        await callback.answer()
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до основного чату {MAIN_CHAT_ID}: {e}")
+        await callback.message.edit_text("⚠️ Помилка: бот не має доступу до основного чату.")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Невідома помилка при публікації в основний чат: {e}")
+        await callback.message.edit_text("⚠️ Помилка при публікації в основний чат.")
+        await callback.answer()
 
 # 🟢 Відхилення посту
 @router.callback_query(lambda c: c.data.startswith("reject:"))
 async def reject_post(callback: types.CallbackQuery):
+    logging.info(f"Callback reject отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     user_id = int(callback.data.split(":")[1])
     logging.info(f"Адмін {callback.from_user.id} відхилив заявку для користувача {user_id}")
-    
+
     try:
-        supabase.table("submissions").update({
+        logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}")
+        result = supabase.table("submissions").update({
             "status": "rejected",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id,
             "rejection_reason": "Невідповідність вимогам"
-        }).eq("user_id", user_id).execute()
+        }).eq("user_id", user_id).eq("status", "pending").execute()
+        logging.info(f"Результат оновлення Supabase: {result}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
         await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
+        await callback.answer()
     except Exception as e:
         logging.error(f"Помилка при відхиленні заявки: {e}")
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
+        await callback.answer()
 
 # Запуск бота
 async def main():
