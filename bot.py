@@ -64,7 +64,6 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-
 # 📋 Стан машини
 class Form(StatesGroup):
     message = State()
@@ -125,7 +124,7 @@ async def handle_message(message: Message, state: FSMContext):
 # 🟢 Обробка callback-запитів (схвалення)
 @router.callback_query(F.data.startswith("approve_"))
 async def handle_approve(query: CallbackQuery):
-    logging.info(f"Callback approve від адміна {query.from_user.id}: {query.data}")
+    logging.info(f"Callback отримано: data={query.data}, from_user={query.from_user.id}")
     parts = query.data.split("_", 2)
     user_id = int(parts[1])
     submission_id = parts[2]
@@ -189,7 +188,7 @@ async def handle_approve(query: CallbackQuery):
 # 🟢 Обробка callback-запитів (відхилення)
 @router.callback_query(F.data.startswith("reject_"))
 async def handle_reject(query: CallbackQuery):
-    logging.info(f"Callback reject від адміна {query.from_user.id}: {query.data}")
+    logging.info(f"Callback отримано: data={query.data}, from_user={query.from_user.id}")
     parts = query.data.split("_", 2)
     user_id = int(parts[1])
     submission_id = parts[2]
