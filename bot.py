@@ -33,7 +33,9 @@ from aiogram.types import (
     KeyboardButton,
     InputMediaPhoto,  
     error_event,
+    ReplyKeyboardRemove, 
 )
+
 from aiogram.types.error_event import ErrorEvent
 
 # 🔐 Токен бота
