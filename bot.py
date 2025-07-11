@@ -7,7 +7,7 @@ import asyncio
 import logging
 import traceback
 from datetime import datetime, timedelta
-from typing import List  # ✅ Додано!
+from typing import List  
 
 from supabase import create_client, Client
 
@@ -31,14 +31,14 @@ from aiogram.types import (
     CallbackQuery,
     ReplyKeyboardMarkup,
     KeyboardButton,
-    InputMediaPhoto,  # ✅ Додано!
+    InputMediaPhoto,  
     error_event,
 )
 from aiogram.types.error_event import ErrorEvent
 
 # 🔐 Токен бота
 TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
-ADMIN_CHAT_ID = -1002802098163  # ✅ Не забудь вказати правильний ID
+ADMIN_CHAT_ID = -1002802098163  
 
 # 🤖 Ініціалізація бота
 bobot = Bot(
@@ -78,6 +78,35 @@ async def cmd_start(message: Message, state: FSMContext):
         )
     )
     await state.set_state(Form.category)
+
+@router.message(F.text.in_(["🐾 Адопти", "🧵 Реквести", "🎨 Коміші / Прайси", "🎁 Лотереї / Конкурси", "📣 Самопіар", "🤝 DTIYS", "📅 Івенти"]))
+async def handle_category_selection(message: Message, state: FSMContext):
+    category = message.text
+    await state.update_data(category=category)
+    await message.answer(
+        f"✅ Щоб опублікувати в розділі {category}, виконай наступні умови:\n\n"
+        f"🔄 Репост спільноти\n"
+        f"✅ Підписка на канал\n"
+        f"📝 Заповни анкету\n\n"
+        f"Коли все буде готово — натисни 'Я все зробив(ла)'",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Я все зробив(ла)")]],
+            resize_keyboard=True
+        )
+    )
+    
+@router.message(F.text == "Я все зробив(ла)")
+async def confirm_ready(message: Message, state: FSMContext):
+    await message.answer(
+        "📋 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+        "1. Ім’я / нікнейм\n"
+        "2. Короткий опис\n"
+        "3. Лінки на соцмережі\n"
+        "4. Додай до 5 зображень",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(Form.description)
+
 
 # 🟢 Категорія
 @router.message(Form.category)
@@ -126,6 +155,8 @@ async def done_images(message: Message, state: FSMContext):
     await finish_submission(message.from_user, state, photos)
 
 # ✅ Фінальна обробка
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 async def finish_submission(user: types.User, state: FSMContext, photos: List[str]):
     data = await state.get_data()
     await state.clear()
@@ -141,7 +172,13 @@ async def finish_submission(user: types.User, state: FSMContext, photos: List[st
     for p in photos[1:]:
         media.append(InputMediaPhoto(media=p))
 
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}")
+    keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}")
+    markup = keyboard.as_markup()
+
     await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
+    await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
 
     supabase.table("submissions").insert({
         "user_id": user.id,
@@ -150,7 +187,35 @@ async def finish_submission(user: types.User, state: FSMContext, photos: List[st
         "description": data["description"],
         "socials": data["socials"],
         "images": photos,
+        "status": "pending",
+        "submitted_at": datetime.utcnow().isoformat()
     }).execute()
+
+
+@router.callback_query(F.data.startswith("approve:"))
+async def approve_post(callback: types.CallbackQuery):
+    user_id = int(callback.data.split(":")[1])
+    supabase.table("submissions").update({
+        "status": "approved",
+        "moderated_at": datetime.utcnow().isoformat(),
+        "moderator_id": callback.from_user.id
+    }).eq("user_id", user_id).execute()
+
+    await callback.message.edit_text("✅ Публікацію схвалено!")
+
+@router.callback_query(F.data.startswith("reject:"))
+async def reject_post(callback: types.CallbackQuery):
+    user_id = int(callback.data.split(":")[1])
+    # Можна додати запит на причину (через FSM)
+    supabase.table("submissions").update({
+        "status": "rejected",
+        "moderated_at": datetime.utcnow().isoformat(),
+        "moderator_id": callback.from_user.id,
+        "rejection_reason": "Невідповідність вимогам"
+    }).eq("user_id", user_id).execute()
+
+    await callback.message.edit_text("❌ Публікацію відхилено.")
+
 
 # Запуск бота
 async def main():
