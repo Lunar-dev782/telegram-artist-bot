@@ -89,11 +89,13 @@ async def handle_message(message: Message, state: FSMContext):
         supabase.table("submissions").insert({
             "user_id": user_id,
             "username": message.from_user.username or message.from_user.first_name,
-            "description": user_message,  # Використовуємо колонку description
+            "category": "Загальне",
+            "description": user_message,
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id
         }).execute()
+        logging.info(f"Заявка збережена в Supabase, submission_id={submission_id}")
     except Exception as e:
         logging.error(f"Помилка при збереженні в Supabase: {e}")
         await message.answer("⚠️ Виникла помилка. Зверніться до адмінів.")
@@ -113,13 +115,14 @@ async def handle_message(message: Message, state: FSMContext):
         supabase.table("submissions").update({
             "media_message_ids": [sent_message.message_id]
         }).eq("submission_id", submission_id).execute()
+        logging.info(f"Повідомлення надіслано в адмін-групу, message_id={sent_message.message_id}")
         await message.answer("✅ Повідомлення надіслано на перевірку!")
         await state.clear()
     except Exception as e:
         logging.error(f"Помилка при надсиланні в адмін-групу: {e}")
         await message.answer("⚠️ Виникла помилка при надсиланні. Зверніться до адмінів.")
 
-# 🟢 Обробка callback-запитів
+# 🟢 Обробка callback-запитів (схвалення)
 @router.callback_query(F.data.startswith("approve_"))
 async def handle_approve(query: CallbackQuery):
     logging.info(f"Callback approve від адміна {query.from_user.id}: {query.data}")
@@ -131,13 +134,30 @@ async def handle_approve(query: CallbackQuery):
     try:
         submission = supabase.table("submissions").select("description").eq("submission_id", submission_id).eq("user_id", user_id).execute()
         if not submission.data:
+            logging.error(f"Заявка не знайдена: submission_id={submission_id}, user_id={user_id}")
             await query.message.edit_text("⚠️ Заявка не знайдена.")
             await query.answer()
             return
         user_message = submission.data[0]["description"]
+        logging.info(f"Отримано повідомлення з Supabase: {user_message}")
     except Exception as e:
         logging.error(f"Помилка при отриманні з Supabase: {e}")
         await query.message.edit_text("⚠️ Помилка при обробці. Зверніться до розробника.")
+        await query.answer()
+        return
+
+    # Перевіряємо права бота в каналі
+    try:
+        chat_member = await bot.get_chat_member(chat_id=MAIN_CHAT_ID, user_id=bot.id)
+        if not chat_member.can_post_messages:
+            logging.error(f"Бот не має прав для надсилання повідомлень у канал {MAIN_CHAT_ID}")
+            await query.message.reply_text("⚠️ Бот не має прав для публікації в канал. Перевірте права адміністратора.")
+            await query.answer()
+            return
+        logging.info(f"Бот має права для надсилання повідомлень у канал {MAIN_CHAT_ID}")
+    except Exception as e:
+        logging.error(f"Помилка при перевірці прав у каналі {MAIN_CHAT_ID}: {e}")
+        await query.message.reply_text(f"⚠️ Помилка при перевірці прав: {e}")
         await query.answer()
         return
 
@@ -152,14 +172,18 @@ async def handle_approve(query: CallbackQuery):
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": query.from_user.id
         }).eq("submission_id", submission_id).execute()
+        logging.info(f"Повідомлення опубліковано в канал {MAIN_CHAT_ID}, submission_id={submission_id}")
         await query.message.reply_text("✅ Повідомлення опубліковано!")
         await bot.send_message(user_id, "🎉 Ваш пост опубліковано!")
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка доступу до каналу {MAIN_CHAT_ID}: {e}")
+        await query.message.reply_text("⚠️ Бот не має доступу до каналу. Перевірте права адміністратора.")
     except Exception as e:
-        logging.error(f"Помилка при публікації: {e}")
-        await query.message.reply_text(f"⚠️ Помилка: {e}")
+        logging.error(f"Помилка при публікації в канал {MAIN_CHAT_ID}: {e}")
+        await query.message.reply_text(f"⚠️ Помилка при публікації: {e}")
     await query.answer()
 
-# 🟢 Відхилення посту
+# 🟢 Обробка callback-запитів (відхилення)
 @router.callback_query(F.data.startswith("reject_"))
 async def handle_reject(query: CallbackQuery):
     logging.info(f"Callback reject від адміна {query.from_user.id}: {query.data}")
@@ -174,6 +198,7 @@ async def handle_reject(query: CallbackQuery):
             "moderator_id": query.from_user.id,
             "rejection_reason": "Невідповідність вимогам"
         }).eq("submission_id", submission_id).execute()
+        logging.info(f"Заявка відхилена, submission_id={submission_id}")
         await query.message.reply_text("❌ Повідомлення відхилено.")
         await bot.send_message(user_id, "😔 Ваш пост відхилено: Невідповідність вимогам.")
     except Exception as e:
