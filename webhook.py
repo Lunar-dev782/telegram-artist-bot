@@ -1,9 +1,10 @@
 import asyncio
 import logging
-import os
 from aiohttp import web
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
-from bot import dp, bot, TOKEN
+from bot import router, TOKEN 
 
 # Токен та URL 
 
@@ -64,7 +65,7 @@ def main():
 
     try:
         logging.info("🚀 Запуск сервера на порту 8000...")
-        web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+        web.run_app(app, host="0.0.0.0", port=8000)
     except Exception as e:
         logging.error(f"❌ Помилка при запуску серверу: {e}")
     except (KeyboardInterrupt, SystemExit):
@@ -78,4 +79,4 @@ if __name__ == "__main__":
         logging.error(f"❌ Фатальна помилка: {e}")
     finally:
         # Закриваємо сесію бота після завершення всіх операцій
-        bot.session.close()  
+        bot.session.close()
