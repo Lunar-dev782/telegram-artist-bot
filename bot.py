@@ -54,7 +54,10 @@ bot = Bot(
 storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 router = Router()
+dp.include_router(router)
 
+# Експортуємо dp для використання в webhook.py
+__all__ = ["dp", "bot"]
 # 🔌 Дані для Supabase
 SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
