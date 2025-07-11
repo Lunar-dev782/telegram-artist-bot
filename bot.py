@@ -54,10 +54,7 @@ bot = Bot(
 storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 router = Router()
-dp.include_router(router)  # Підключаємо маршрутизатор один раз
-
-# Експортуємо dp і bot для використання в webhook.py
-__all__ = ["dp", "bot", "TOKEN"]
+dp.include_router(router)
 
 # 🔌 Дані для Supabase
 SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
@@ -254,7 +251,7 @@ async def done_images(message: Message, state: FSMContext):
 # ✅ Фінальна обробка
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
-    submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
+    submission_id = str(uuid.uuid4())
     logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
     await state.clear()
 
@@ -317,7 +314,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки. Зверніться до @AdminUsername.")
         return
 
-# 🟢 Схвалення посту
+# 🟢 Схвалення посту та пересилання в основний чат
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: types.CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
@@ -333,7 +330,7 @@ async def approve_post(callback: types.CallbackQuery):
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result.data}")
+        logging.info(f"Результат оновлення Supabase: {result}")
     except Exception as e:
         logging.error(f"Помилка при оновленні статусу в Supabase: {e}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
@@ -352,20 +349,35 @@ async def approve_post(callback: types.CallbackQuery):
             return
 
         data = submission.data[0]
-        post_text = (
-            f"📢 <b>{data['category']}</b>\n\n"
-            f"{data['description']}\n\n"
-            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
-            f"👤 Від: @{data['username']}\n"
-            f"#public"
-        )
-        media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
-        for photo in data["images"][1:]:
-            media.append(InputMediaPhoto(media=photo))
-        
-        logging.info(f"Відправка медіа-групи в основний чат {MAIN_CHAT_ID}")
-        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
-        
+        media_message_ids = data.get("media_message_ids", [])
+
+        try:
+            if media_message_ids:
+                logging.info(f"Пересилання медіа-групи з адмінського чату {ADMIN_CHAT_ID} в основний чат {MAIN_CHAT_ID}")
+                for message_id in media_message_ids:
+                    await asyncio.sleep(1)
+                    await bot.forward_message(
+                        chat_id=MAIN_CHAT_ID,
+                        from_chat_id=ADMIN_CHAT_ID,
+                        message_id=message_id
+                    )
+            else:
+                raise ValueError("media_message_ids порожній")
+        except Exception as e:
+            logging.warning(f"Помилка пересилання: {e}. Спроба відправки медіа-групи напряму.")
+            post_text = (
+                f"📢 <b>{data['category']}</b>\n\n"
+                f"{data['description']}\n\n"
+                f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
+                f"👤 Від: @{data['username']}\n"
+                f"#public"
+            )
+            media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
+            for photo in data["images"][1:]:
+                media.append(InputMediaPhoto(media=photo))
+            logging.info(f"Відправка медіа-групи в основний чат {MAIN_CHAT_ID}")
+            await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+
         await callback.message.edit_text("✅ Публікацію схвалено та опубліковано в основному чаті!")
         await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
         await callback.answer()
@@ -399,7 +411,7 @@ async def reject_post(callback: types.CallbackQuery):
             "moderator_id": callback.from_user.id,
             "rejection_reason": "Невідповідність вимогам"
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result.data}")
+        logging.info(f"Результат оновлення Supabase: {result}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
         await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
         await callback.answer()
@@ -411,11 +423,14 @@ async def reject_post(callback: types.CallbackQuery):
 # 🟢 Діагностичний обробник callback-запитів
 @router.callback_query()
 async def debug_callback(callback: types.CallbackQuery):
-    logging.info(f"DEBUG: Отримано callback-запит: {callback.data} від адміна {callback.from_user.id}")
+    logging.info(f"DEBUG: Отримано callback-запит: {callback.data}")
     await callback.answer("Отримано callback, але немає обробника")
 
-# 🟢 Обробка помилок
+# Обробка помилок
 @dp.errors()
 async def error_handler(update, exception):
     logging.exception(f"Виняток: {exception}")
     return True
+
+# Експортуємо dp і bot для webhook.py
+__all__ = ["dp", "bot", "TOKEN"]
