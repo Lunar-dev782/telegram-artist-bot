@@ -64,6 +64,7 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+
 # 🟢 /start
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
@@ -84,7 +85,7 @@ async def handle_message(message: Message, state: FSMContext):
         supabase.table("submissions").insert({
             "user_id": user_id,
             "username": message.from_user.username or message.from_user.first_name,
-            "message": user_message,
+            "description": user_message,  # Змінено на "description"
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id
@@ -119,12 +120,12 @@ async def handle_callback(query: CallbackQuery):
     
     # Отримуємо повідомлення з Supabase
     try:
-        submission = supabase.table("submissions").select("message").eq("submission_id", submission_id).eq("user_id", user_id).execute()
+        submission = supabase.table("submissions").select("description").eq("submission_id", submission_id).eq("user_id", user_id).execute()
         if not submission.data:
             await query.message.edit_text("⚠️ Заявка не знайдена.")
             await query.answer()
             return
-        user_message = submission.data[0]["message"]
+        user_message = submission.data[0]["description"]
     except Exception as e:
         logging.error(f"Помилка при отриманні з Supabase: {e}")
         await query.message.edit_text("⚠️ Помилка при обробці. Зверніться до розробника.")
