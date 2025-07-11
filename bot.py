@@ -64,52 +64,93 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+# 🟢 /start
+@router.message(CommandStart())
+async def start(message: Message, state: FSMContext):
+    logging.info(f"Команда /start від користувача {message.from_user.id}")
+    await message.answer("Напишіть щось")
+    await state.set_state("waiting_for_message")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Напишіть щось")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    user_id = update.message.from_user.id
+# 🟢 Обробка текстового повідомлення
+@router.message(StateFilter("waiting_for_message"), F.text)
+async def handle_message(message: Message, state: FSMContext):
+    user_message = message.text
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав повідомлення: {user_message}")
     
+    # Зберігаємо повідомлення в Supabase
+    try:
+        submission_id = str(uuid.uuid4())
+        supabase.table("submissions").insert({
+            "user_id": user_id,
+            "username": message.from_user.username or message.from_user.first_name,
+            "message": user_message,
+            "status": "pending",
+            "submitted_at": datetime.utcnow().isoformat(),
+            "submission_id": submission_id
+        }).execute()
+    except Exception as e:
+        logging.error(f"Помилка при збереженні в Supabase: {e}")
+        await message.answer("⚠️ Виникла помилка. Зверніться до адмінів.")
+        return
+
     # Надсилаємо повідомлення в адмін-групу з кнопкою підтвердження
-    sent_message = await context.bot.send_message(
-        chat_id=ADMIN_GROUP_ID,
-        text=f"Нове повідомлення від {user_id}:\n{user_message}",
-        reply_markup={
-            "inline_keyboard": [[
-                {"text": "Опублікувати", "callback_data": f"approve_{user_id}_{user_message[:50]}"}
-            ]]
-        }
-    )
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=f"Нове повідомлення від @{message.from_user.username or message.from_user.first_name}:\n{user_message}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Опублікувати", callback_data=f"approve_{user_id}_{submission_id}")
+            ]])
+        )
+        await message.answer("✅ Повідомлення надіслано на перевірку!")
+        await state.clear()
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні в адмін-групу: {e}")
+        await message.answer("⚠️ Виникла помилка при надсиланні. Зверніться до адмінів.")
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# 🟢 Обробка callback-запитів
+@router.callback_query(F.data.startswith("approve_"))
+async def handle_callback(query: CallbackQuery):
+    logging.info(f"Callback від адміна {query.from_user.id}: {query.data}")
+    parts = query.data.split("_", 2)
+    user_id = int(parts[1])
+    submission_id = parts[2]
     
-    if query.data.startswith("approve_"):
-        # Отримуємо повідомлення користувача з callback_data
-        user_message = query.data.replace("approve_", "").split("_", 1)[1]
-        
-        # Публікуємо повідомлення на канал
-        await context.bot.send_message(
-            chat_id=CHANNEL_ID,
+    # Отримуємо повідомлення з Supabase
+    try:
+        submission = supabase.table("submissions").select("message").eq("submission_id", submission_id).eq("user_id", user_id).execute()
+        if not submission.data:
+            await query.message.edit_text("⚠️ Заявка не знайдена.")
+            await query.answer()
+            return
+        user_message = submission.data[0]["message"]
+    except Exception as e:
+        logging.error(f"Помилка при отриманні з Supabase: {e}")
+        await query.message.edit_text("⚠️ Помилка при обробці. Зверніться до розробника.")
+        await query.answer()
+        return
+
+    # Публікуємо повідомлення на канал
+    try:
+        await bot.send_message(
+            chat_id=MAIN_CHAT_ID,
             text=user_message
         )
-        await query.message.reply_text("Повідомлення опубліковано!")
-
-def main():
-    app = Application.builder().token(TOKEN).build()
-    
-    # Обробники
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    
-
+        supabase.table("submissions").update({
+            "status": "approved",
+            "moderated_at": datetime.utcnow().isoformat(),
+            "moderator_id": query.from_user.id
+        }).eq("submission_id", submission_id).execute()
+        await query.message.reply_text("✅ Повідомлення опубліковано!")
+        await bot.send_message(user_id, "🎉 Ваш пост опубліковано!")
+    except Exception as e:
+        logging.error(f"Помилка при публікації: {e}")
+        await query.message.reply_text(f"⚠️ Помилка: {e}")
+    await query.answer()
 
 # 🟢 Обробка помилок
-@dp.errors()
+@dp.error()
 async def error_handler(update, exception):
     logging.exception(f"Виняток: {exception}")
     return True
