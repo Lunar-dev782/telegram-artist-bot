@@ -133,6 +133,7 @@ async def handle_approve(query: CallbackQuery):
     # Отримуємо повідомлення з Supabase
     try:
         submission = supabase.table("submissions").select("description").eq("submission_id", submission_id).eq("user_id", user_id).execute()
+        logging.info(f"Supabase запит: submission_id={submission_id}, user_id={user_id}, результат={submission.data}")
         if not submission.data:
             logging.error(f"Заявка не знайдена: submission_id={submission_id}, user_id={user_id}")
             await query.message.edit_text("⚠️ Заявка не знайдена.")
@@ -161,25 +162,27 @@ async def handle_approve(query: CallbackQuery):
         await query.answer()
         return
 
-    # Публікуємо повідомлення на канал
+    # Публікуємо повідомлення на канал з явним очікуванням відповіді
     try:
-        await bot.send_message(
+        sent_message = await bot.send_message(
             chat_id=MAIN_CHAT_ID,
-            text=user_message
+            text=user_message,
+            disable_notification=False
         )
+        logging.info(f"Повідомлення успішно надіслано в канал {MAIN_CHAT_ID}, message_id={sent_message.message_id}")
         supabase.table("submissions").update({
             "status": "approved",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": query.from_user.id
         }).eq("submission_id", submission_id).execute()
-        logging.info(f"Повідомлення опубліковано в канал {MAIN_CHAT_ID}, submission_id={submission_id}")
+        logging.info(f"Статус оновлено в Supabase, submission_id={submission_id}")
         await query.message.reply_text("✅ Повідомлення опубліковано!")
         await bot.send_message(user_id, "🎉 Ваш пост опубліковано!")
     except TelegramForbiddenError as e:
         logging.error(f"Помилка доступу до каналу {MAIN_CHAT_ID}: {e}")
         await query.message.reply_text("⚠️ Бот не має доступу до каналу. Перевірте права адміністратора.")
     except Exception as e:
-        logging.error(f"Помилка при публікації в канал {MAIN_CHAT_ID}: {e}")
+        logging.error(f"Помилка при публікації в канал {MAIN_CHAT_ID}: {e}, traceback={traceback.format_exc()}")
         await query.message.reply_text(f"⚠️ Помилка при публікації: {e}")
     await query.answer()
 
