@@ -54,10 +54,11 @@ bot = Bot(
 storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 router = Router()
-dp.include_router(router)
+dp.include_router(router)  # Підключаємо маршрутизатор один раз
 
-# Експортуємо dp для використання в webhook.py
-__all__ = ["dp", "bot"]
+# Експортуємо dp і bot для використання в webhook.py
+__all__ = ["dp", "bot", "TOKEN"]
+
 # 🔌 Дані для Supabase
 SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
@@ -316,7 +317,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки. Зверніться до @AdminUsername.")
         return
 
-# 🟢 Схвалення посту та пересилання в основний чат
+# 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: types.CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
@@ -351,37 +352,20 @@ async def approve_post(callback: types.CallbackQuery):
             return
 
         data = submission.data[0]
-        media_message_ids = data.get("media_message_ids", [])
-        logging.info(f"media_message_ids: {media_message_ids}")
-
-        try:
-            if media_message_ids:
-                logging.info(f"Пересилання медіа-групи з адмінського чату {ADMIN_CHAT_ID} в основний чат {MAIN_CHAT_ID}")
-                for message_id in media_message_ids:
-                    logging.info(f"Пересилання message_id={message_id}")
-                    await asyncio.sleep(1)
-                    await bot.forward_message(
-                        chat_id=MAIN_CHAT_ID,
-                        from_chat_id=ADMIN_CHAT_ID,
-                        message_id=message_id
-                    )
-            else:
-                raise ValueError("media_message_ids порожній")
-        except Exception as e:
-            logging.warning(f"Помилка пересилання: {e}. Спроба відправки медіа-групи напряму.")
-            post_text = (
-                f"📢 <b>{data['category']}</b>\n\n"
-                f"{data['description']}\n\n"
-                f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
-                f"👤 Від: @{data['username']}\n"
-                f"#public"
-            )
-            media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
-            for photo in data["images"][1:]:
-                media.append(InputMediaPhoto(media=photo))
-            logging.info(f"Відправка медіа-групи в основний чат {MAIN_CHAT_ID}")
-            await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
-
+        post_text = (
+            f"📢 <b>{data['category']}</b>\n\n"
+            f"{data['description']}\n\n"
+            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
+            f"👤 Від: @{data['username']}\n"
+            f"#public"
+        )
+        media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
+        for photo in data["images"][1:]:
+            media.append(InputMediaPhoto(media=photo))
+        
+        logging.info(f"Відправка медіа-групи в основний чат {MAIN_CHAT_ID}")
+        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+        
         await callback.message.edit_text("✅ Публікацію схвалено та опубліковано в основному чаті!")
         await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
         await callback.answer()
@@ -415,7 +399,7 @@ async def reject_post(callback: types.CallbackQuery):
             "moderator_id": callback.from_user.id,
             "rejection_reason": "Невідповідність вимогам"
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result}")
+        logging.info(f"Результат оновлення Supabase: {result.data}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
         await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
         await callback.answer()
@@ -424,35 +408,14 @@ async def reject_post(callback: types.CallbackQuery):
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
         await callback.answer()
 
+# 🟢 Діагностичний обробник callback-запитів
 @router.callback_query()
 async def debug_callback(callback: types.CallbackQuery):
     logging.info(f"DEBUG: Отримано callback-запит: {callback.data} від адміна {callback.from_user.id}")
     await callback.answer("Отримано callback, але немає обробника")
 
-@router.message(Command("test_main_chat"))
-async def test_main_chat(message: Message):
-    try:
-        logging.info(f"Тестування доступу до основного чату {MAIN_CHAT_ID}")
-        await bot.send_message(chat_id=MAIN_CHAT_ID, text="Тестове повідомлення від бота")
-        await message.answer("Тестове повідомлення успішно надіслано в основний чат!")
-    except Exception as e:
-        logging.error(f"Помилка тестування основного чату: {e}")
-        await message.answer(f"Помилка: {e}")
-
-# Обробка помилок
+# 🟢 Обробка помилок
 @dp.errors()
 async def error_handler(update, exception):
     logging.exception(f"Виняток: {exception}")
     return True
-
-# Запуск бота
-async def main():
-    dp.include_router(router)
-    logging.info("Запуск бота...")
-    try:
-        await dp.start_polling()
-    except Exception as e:
-        logging.error(f"Помилка при запуску бота: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
