@@ -153,13 +153,11 @@ async def reject_submission(callback: CallbackQuery, bot: Bot):
 
     await callback.answer()
 
-# Запуск бота 
+# Обробка помилок
+@dp.errors()
+async def error_handler(update, exception):
+    logging.exception(f"Виняток: {exception}")
+    return True
 
-async def main(): 
-    await router.start_polling(bot)  # Запускаємо polling з router 
-
-  
-if __name__ == "__main__": 
-    import asyncio 
-    asyncio.run(main()) 
-
+# Експортуємо dp і bot для webhook.py
+__all__ = ["dp", "bot", "TOKEN"]
