@@ -420,6 +420,42 @@ async def reject_post(callback: types.CallbackQuery):
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
         await callback.answer()
 
+# ✅ Функція для надсилання заявки на перевірку в адмінський чат
+def send_application_to_admin(context: CallbackContext, user_id: int, user_data: str):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Підтвердити", callback_data=f"confirm:{user_id}:{user_data}")]
+    ])
+    context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=f"🔔 Нова заявка від користувача {user_id}\n\n{user_data}",
+        reply_markup=keyboard
+    )
+
+# ✅ Обробка натискання кнопки підтвердження
+def confirm_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+
+    data = query.data  # приклад: "confirm:12345678:Текст заявки"
+    if data.startswith("confirm:"):
+        try:
+            _, user_id, user_data = data.split(":", 2)
+
+            # 🔔 Повідомлення в канал
+            context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=f"✅ Підтверджено!\nЗаявка від користувача {user_id}:\n\n{user_data}"
+            )
+
+            # 🔁 Оновити повідомлення в адмінському чаті
+            query.edit_message_text("✅ Заявку підтверджено та опубліковано в каналі.")
+        except Exception as e:
+            query.edit_message_text(f"❌ Помилка обробки заявки: {e}")
+
+# ✅ Додай цей хендлер до свого Dispatcher
+def register_handlers(dispatcher):
+    dispatcher.add_handler(CallbackQueryHandler(confirm_callback, pattern=r"^confirm:\d+:"))
+
 # 🟢 Діагностичний обробник callback-запитів
 @router.callback_query()
 async def debug_callback(callback: types.CallbackQuery):
