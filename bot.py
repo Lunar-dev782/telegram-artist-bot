@@ -41,6 +41,7 @@ from aiogram.types.error_event import ErrorEvent
 # 🔐 Токен бота
 TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc"
 ADMIN_CHAT_ID = -1002802098163  
+MAIN_CHAT_ID = -1002865535470
 
 # 🤖 Ініціалізація бота
 bobot = Bot(
@@ -83,9 +84,7 @@ async def cmd_start(message: Message, state: FSMContext):
         "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
         "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text=cat)] for cat in CATEGORIES.keys()
-            ],
+            keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
             resize_keyboard=True
         )
     )
@@ -125,7 +124,6 @@ async def cmd_rules(message: Message):
 @router.message(lambda message: message.text in CATEGORIES)
 async def handle_category_selection(message: Message, state: FSMContext):
     category = message.text
-    # Перевірка обмеження частоти публікацій
     user_id = message.from_user.id
     last_submission = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).order("submitted_at", desc=True).limit(1).execute()
     
@@ -154,7 +152,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
 @router.message(lambda message: message.text == "Я все зробив(ла)")
 async def confirm_ready(message: Message, state: FSMContext):
     await message.answer(
-        "📋 Надішли, будь ласка, цю інформацію *одним повідом潇ф повідомленням*:\n\n"
+        "📋 Надішли, будь ласка, цю інформацію *одним повідомленням*:\n\n"
         "1. Ім’я / нікнейм\n"
         "2. Короткий опис\n"
         "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм)\n"
@@ -211,7 +209,7 @@ async def done_images(message: Message, state: FSMContext):
     await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos)
 
-# ✅ Фінальна обробка
+# ✅ Фінальна обробка (відправка адмінам)
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     await state.clear()
@@ -246,25 +244,48 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         "submitted_at": datetime.utcnow().isoformat()
     }).execute()
 
-# 🟢 Схвалення посту
+# 🟢 Схвалення посту та публікація в основний чат
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: types.CallbackQuery):
     user_id = int(callback.data.split(":")[1])
+    
+    # Оновлення статусу в Supabase
     supabase.table("submissions").update({
         "status": "approved",
         "moderated_at": datetime.utcnow().isoformat(),
         "moderator_id": callback.from_user.id
     }).eq("user_id", user_id).execute()
 
-    await callback.message.edit_text("✅ Публікацію схвалено!")
-    await bot.send_message(user_id, "🎉 Вашу публікацію схвалено!")
+    # Отримання даних анкети з Supabase
+    submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("status", "approved").order("submitted_at", desc=True).limit(1).execute()
+    
+    if submission.data:
+        data = submission.data[0]
+        # Форматування поста для основного чату
+        post_text = (
+            f"📢 <b>{data['category']}</b>\n\n"
+            f"{data['description']}\n\n"
+            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
+            f"👤 Від: @{data['username']}\n"
+            f"#public"
+        )
+
+        # Надсилання поста в основний чат
+        media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
+        for photo in data["images"][1:]:
+            media.append(InputMediaPhoto(media=photo))
+
+        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+
+    # Повідомлення адміну та користувачу
+    await callback.message.edit_text("✅ Публікацію схвалено та опубліковано!")
+    await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
 
 # 🟢 Відхилення посту
 @router.callback_query(lambda c: c.data.startswith("reject:"))
 async def reject_post(callback: types.CallbackQuery):
     user_id = int(callback.data.split(":")[1])
-    # Можна додати FSM для запиту причини відмови
-    supabase.table("submissions"). footnote: update({
+    supabase.table("submissions").update({
         "status": "rejected",
         "moderated_at": datetime.utcnow().isoformat(),
         "moderator_id": callback.from_user.id,
@@ -272,7 +293,11 @@ async def reject_post(callback: types.CallbackQuery):
     }).eq("user_id", user_id).execute()
 
     await callback.message.edit_text("❌ Публікацію відхилено.")
-    await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")# Запуск бота
+    await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
+
+
+
+    # Запуск бота
 async def main():
     await router.start_polling(bot)  # Запускаємо polling з router
 
