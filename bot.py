@@ -148,21 +148,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
         parse_mode="Markdown"
     )
 
-async def check_subscription(user_id: int, channel_id: str) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logging.error(f"Помилка перевірки підписки: {e}")
-        return False
 
-@router.message(lambda message: message.text == "Я все зробив(ла)")
-async def confirm_ready(message: Message, state: FSMContext):
-    channel_id = "@channel_link"  # Замініть на ваш канал
-    if not await check_subscription(message.from_user.id, channel_id):
-        await message.answer("⚠️ Підпишись на наш канал перед подачею заявки!")
-        return
-    # Решта коду
 
 # 🟢 Підтвердження виконання умов
 @router.message(lambda message: message.text == "Я все зробив(ла)")
