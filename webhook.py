@@ -9,7 +9,7 @@ from bot import router, TOKEN
 # Токен та URL 
 
 TOKEN = "7645134499:AAFRfwsn7dr5W2m81gCJPwX944PRqk-sjEc" 
-WEBHOOK_URL = "https://telegram-artist-bot.onrender.com" 
+WEBHOOK_URL = "https://telegram-artist-bot-f1nz.onrender.com" 
 WEBHOOK_PATH = "/webhook/telegram" 
 
 # Ініціалізація Bot
