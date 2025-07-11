@@ -65,15 +65,19 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
+# 📋 Стан машини
+class Form(StatesGroup):
+    message = State()
+
 # 🟢 /start
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
     logging.info(f"Команда /start від користувача {message.from_user.id}")
-    await message.answer("Напишіть щось")
-    await state.set_state("waiting_for_message")
+    await message.answer("Напишіть повідомлення для публікації")
+    await state.set_state(Form.message)
 
 # 🟢 Обробка текстового повідомлення
-@router.message(StateFilter("waiting_for_message"), F.text)
+@router.message(Form.message, F.text)
 async def handle_message(message: Message, state: FSMContext):
     user_message = message.text
     user_id = message.from_user.id
@@ -85,7 +89,7 @@ async def handle_message(message: Message, state: FSMContext):
         supabase.table("submissions").insert({
             "user_id": user_id,
             "username": message.from_user.username or message.from_user.first_name,
-            "description": user_message,  # Змінено на "description"
+            "description": user_message,  # Використовуємо колонку description
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id
@@ -95,15 +99,20 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer("⚠️ Виникла помилка. Зверніться до адмінів.")
         return
 
-    # Надсилаємо повідомлення в адмін-групу з кнопкою підтвердження
+    # Надсилаємо повідомлення в адмін-групу
     try:
-        await bot.send_message(
+        sent_message = await bot.send_message(
             chat_id=ADMIN_CHAT_ID,
             text=f"Нове повідомлення від @{message.from_user.username or message.from_user.first_name}:\n{user_message}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="Опублікувати", callback_data=f"approve_{user_id}_{submission_id}")
+                InlineKeyboardButton(text="✅ Опублікувати", callback_data=f"approve_{user_id}_{submission_id}"),
+                InlineKeyboardButton(text="❌ Відмовити", callback_data=f"reject_{user_id}_{submission_id}")
             ]])
         )
+        # Зберігаємо media_message_ids
+        supabase.table("submissions").update({
+            "media_message_ids": [sent_message.message_id]
+        }).eq("submission_id", submission_id).execute()
         await message.answer("✅ Повідомлення надіслано на перевірку!")
         await state.clear()
     except Exception as e:
@@ -112,8 +121,8 @@ async def handle_message(message: Message, state: FSMContext):
 
 # 🟢 Обробка callback-запитів
 @router.callback_query(F.data.startswith("approve_"))
-async def handle_callback(query: CallbackQuery):
-    logging.info(f"Callback від адміна {query.from_user.id}: {query.data}")
+async def handle_approve(query: CallbackQuery):
+    logging.info(f"Callback approve від адміна {query.from_user.id}: {query.data}")
     parts = query.data.split("_", 2)
     user_id = int(parts[1])
     submission_id = parts[2]
@@ -147,6 +156,28 @@ async def handle_callback(query: CallbackQuery):
         await bot.send_message(user_id, "🎉 Ваш пост опубліковано!")
     except Exception as e:
         logging.error(f"Помилка при публікації: {e}")
+        await query.message.reply_text(f"⚠️ Помилка: {e}")
+    await query.answer()
+
+# 🟢 Відхилення посту
+@router.callback_query(F.data.startswith("reject_"))
+async def handle_reject(query: CallbackQuery):
+    logging.info(f"Callback reject від адміна {query.from_user.id}: {query.data}")
+    parts = query.data.split("_", 2)
+    user_id = int(parts[1])
+    submission_id = parts[2]
+    
+    try:
+        supabase.table("submissions").update({
+            "status": "rejected",
+            "moderated_at": datetime.utcnow().isoformat(),
+            "moderator_id": query.from_user.id,
+            "rejection_reason": "Невідповідність вимогам"
+        }).eq("submission_id", submission_id).execute()
+        await query.message.reply_text("❌ Повідомлення відхилено.")
+        await bot.send_message(user_id, "😔 Ваш пост відхилено: Невідповідність вимогам.")
+    except Exception as e:
+        logging.error(f"Помилка при відхиленні: {e}")
         await query.message.reply_text(f"⚠️ Помилка: {e}")
     await query.answer()
 
