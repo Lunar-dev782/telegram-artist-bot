@@ -339,7 +339,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
 
     try:
         logging.info(f"Збереження заявки в Supabase для користувача {user.id}, submission_id={submission_id}")
-        supabase.table("submissions").insert({
+        submission_data = {
             "user_id": user.id,
             "username": user.username or user.first_name,
             "category": data["category"],
@@ -353,7 +353,26 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id,
             "media_message_ids": media_message_ids
-        }).execute()
+        }
+        result = supabase.table("submissions").insert(submission_data).execute()
+        logging.info(f"Результат вставки в Supabase: {result.data}")
+        
+        # Перевірка, чи заявка була успішно вставлена
+        if not result.data:
+            logging.error(f"Не вдалося вставити заявку в Supabase для user_id={user.id}, submission_id={submission_id}")
+            await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки в базі даних. Зверніться до @AdminUsername.")
+            await state.clear()
+            return
+
+        # Додаткова перевірка збереженої заявки
+        check_insert = supabase.table("submissions").select("*").eq("user_id", user.id).eq("submission_id", submission_id).execute()
+        logging.info(f"Перевірка збереженої заявки: {check_insert.data}")
+        if not check_insert.data:
+            logging.error(f"Заявка для user_id={user.id}, submission_id={submission_id} не знайдена після вставки")
+            await bot.send_message(user.id, "⚠️ Заявка не була збережена в базі даних. Зверніться до @AdminUsername.")
+            await state.clear()
+            return
+
         logging.info(f"Заявка успішно збережена в Supabase")
         await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
         await state.clear()
