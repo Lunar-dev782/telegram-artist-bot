@@ -67,6 +67,8 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 # 📋 Стан машини
 class Form(StatesGroup):
     category = State()
+    repost_platform = State()  # Новий стан для вибору платформи репосту
+    repost_link = State()      # Новий стан для отримання посилання на репост
     description = State()
     images = State()
 
@@ -102,7 +104,6 @@ async def handle_start(message: Message, state: FSMContext):
     )
     await state.set_state(Form.category)
 
-
 # 🟢 /help
 @router.message(Command("help"))
 async def cmd_help(message: Message):
@@ -114,7 +115,7 @@ async def cmd_help(message: Message):
         "2️⃣ Виконай умови (репост, підписка, заповнення анкети).\n"
         "3️⃣ Надішли дані одним повідомленням (нік, опис, соцмережі, зображення).\n"
         "4️⃣ Чекай на перевірку адміном.\n\n"
-        "📜 Правила: /help\n"
+        "📜 Правила: /rules\n"
         "📩 Якщо є питання, пиши адмінам: @AdminUsername"
     )
     await message.answer(help_text)
@@ -129,8 +130,9 @@ async def cmd_rules(message: Message):
         "2. Надсилайте лише оригінальний контент.\n"
         "3. Не більше 5 зображень на пост.\n"
         "4. Публікації дозволені не частіше, ніж раз на 7 днів.\n"
-        "5. Заборонено NSFW, образливий або незаконний контент.\n"
-        "6. Адміни мають право відхилити заявку з поясненням.\n\n"
+        "5. Зробіть репост нашої спільноти в Instagram або Telegram.\n"
+        "6. Заборонено NSFW, образливий або незаконний контент.\n"
+        "7. Адміни мають право відхилити заявку з поясненням.\n\n"
         "📩 З питаннями: @AdminUsername"
     )
     await message.answer(rules_text)
@@ -157,24 +159,65 @@ async def handle_category_selection(message: Message, state: FSMContext):
     await state.update_data(category=category)
     await message.answer(
         f"✅ Щоб опублікувати в розділі {category}, виконай наступні кроки:\n\n"
-        f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link)\n"
+        f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) в Instagram або Telegram\n"
         f"✅ Підпишись на [наш канал](https://t.me/channel_link)\n"
         f"📝 Заповни анкету\n\n"
         f"📌 Приклад: {CATEGORIES[category]}\n\n"
-        f"Коли все буде готово — натисни 'Я все зробив(ла)'",
+        f"Куди ти зробив(ла) репост?",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Я все зробив(ла)")]],
+            keyboard=[
+                [KeyboardButton(text="Instagram"), KeyboardButton(text="Telegram")],
+                [KeyboardButton(text="Я не робив(ла) репост")]
+            ],
             resize_keyboard=True
         ),
         parse_mode="Markdown"
     )
+    await state.set_state(Form.repost_platform)
 
-# 🟢 Підтвердження виконання умов
-@router.message(lambda message: message.text == "Я все зробив(ла)")
-async def confirm_ready(message: Message, state: FSMContext):
-    logging.info(f"Користувач {message.from_user.id} підтвердив виконання умов")
+# 🟢 Обробка вибору платформи для репосту
+@router.message(Form.repost_platform)
+async def process_repost_platform(message: Message, state: FSMContext):
+    platform = message.text
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав платформу для репосту: {platform}")
+
+    if platform == "Я не робив(ла) репост":
+        await message.answer(
+            "🔄 Будь ласка, зроби репост [нашої спільноти](https://t.me/community_link) в Instagram або Telegram, "
+            "а потім вибери платформу ще раз.",
+            parse_mode="Markdown"
+        )
+        return
+
+    if platform not in ["Instagram", "Telegram"]:
+        await message.answer("⚠️ Будь ласка, вибери одну з запропонованих платформ: Instagram або Telegram.")
+        return
+
+    await state.update_data(repost_platform=platform)
     await message.answer(
-        "📋 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+        f"🔗 Будь ласка, надішли посилання на твій репост у {platform}.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(Form.repost_link)
+
+# 🟢 Обробка посилання на репост
+@router.message(Form.repost_link)
+async def process_repost_link(message: Message, state: FSMContext):
+    repost_link = message.text
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав посилання на репост: {repost_link}")
+
+    # Базова перевірка формату посилання
+    if not (repost_link.startswith("https://www.instagram.com/") or repost_link.startswith("https://t.me/")):
+        await message.answer(
+            "⚠️ Посилання виглядає некоректним. Будь ласка, надішли правильне посилання на репост у Instagram або Telegram."
+        )
+        return
+
+    await state.update_data(repost_link=repost_link)
+    await message.answer(
+        "✅ Дякуємо за репост! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
         "1. Короткий опис\n"
         "2. Лінки на соцмережі та сайти (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
         "📌 Приклад:\n"
@@ -251,11 +294,12 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
     logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
-    await state.clear()
 
     text = (
         f"📥 <b>Нова заявка від</b> @{user.username or user.first_name}\n"
         f"<b>Категорія:</b> {data['category']}\n"
+        f"<b>Платформа репосту:</b> {data.get('repost_platform', 'Невказано')}\n"
+        f"<b>Посилання на репост:</b> {data.get('repost_link', 'Невказано')}\n"
         f"<b>Нік:</b> {data.get('nickname', 'Невказано')}\n"
         f"<b>Опис:</b> {data.get('description', 'Невказано')}\n"
         f"<b>Соцмережі:</b>\n{data.get('socials', 'Невказано')}\n"
@@ -280,14 +324,17 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     except TelegramBadRequest as e:
         logging.error(f"Помилка TelegramBadRequest при надсиланні в адмінський чат: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам (BadRequest). Зверніться до @AdminUsername.")
+        await state.clear()
         return
     except TelegramForbiddenError as e:
         logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка: бот не може надіслати заявку адмінам (Forbidden). Зверніться до @AdminUsername.")
+        await state.clear()
         return
     except Exception as e:
         logging.error(f"Невідома помилка при надсиланні в адмінський чат: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам. Зверніться до @AdminUsername.")
+        await state.clear()
         return
 
     try:
@@ -296,6 +343,8 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "user_id": user.id,
             "username": user.username or user.first_name,
             "category": data["category"],
+            "repost_platform": data.get("repost_platform", ""),
+            "repost_link": data.get("repost_link", ""),
             "nickname": data.get("nickname", ""),
             "description": data.get("description", ""),
             "socials": data.get("socials", ""),
@@ -307,14 +356,16 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         }).execute()
         logging.info(f"Заявка успішно збережена в Supabase")
         await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
+        await state.clear()
     except Exception as e:
         logging.error(f"Помилка при збереженні в Supabase: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки. Зверніться до @AdminUsername.")
+        await state.clear()
         return
 
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
-async def approve_post(callback: CallbackQuery):
+async def approve_post самостоятельно(callback: CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     parts = callback.data.split(":")
     user_id = int(parts[1])
