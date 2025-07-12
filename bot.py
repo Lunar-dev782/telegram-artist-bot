@@ -64,7 +64,6 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-
 # 📋 Стан машини
 class Form(StatesGroup):
     category = State()
@@ -217,7 +216,7 @@ async def confirm_ready(message: Message, state: FSMContext):
         "📋 Надішли, будь ласка, цю інформацію *одним повідомленням*:\n\n"
         "1. Ім’я / нікнейм\n"
         "2. Короткий опис\n"
-        "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм)\n\n"
+        "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейm)\n\n"
         "📌 Приклад:\n"
         "Нік: @Artist\n"
         "Опис: Продаю персонажа, унікальний дизайн!\n"
@@ -235,7 +234,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
     if not message.text or len(message.text.split('\n')) < 3:
         await message.answer(
             "⚠️ Будь ласка, надішли всю інформацію одним повідомленням:\n"
-            "1. Ім’я / нікнейм\n"
+            "1. Ім’я / нікнейm\n"
             "2. Короткий опис\n"
             "3. Лінки на соцмережі\n\n"
             "Спробуй ще раз."
@@ -255,7 +254,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         logging.error(f"Помилка обробки повідомлення: {e}")
         await message.answer(
             "⚠️ Помилка формату повідомлення. Переконайся, що ти надіслав усі дані коректно:\n"
-            "1. Ім’я / нікнейм\n"
+            "1. Ім’я / нікнейm\n"
             "2. Короткий опис\n"
             "3. Лінки на соцмережі\n\n"
             "Спробуй ще раз."
@@ -345,17 +344,21 @@ async def approve_post(callback: CallbackQuery, state: FSMContext):
     media_message_ids = data.get("media_message_ids", [])
 
     try:
-        # Отримуємо перше повідомлення за message_id
-        first_message = await bot.get_message(chat_id=ADMIN_CHAT_ID, message_id=media_message_ids[0])
-        if not first_message or not first_message.photo:
+        # Отримуємо перше повідомлення через API Telegram
+        response = await bot.request("getMessage", {
+            "chat_id": ADMIN_CHAT_ID,
+            "message_id": media_message_ids[0]
+        })
+        message = types.Message(**response.result)
+        if not message or not message.photo:
             logging.error(f"Не знайдено повідомлення для submission_id={submission_id}")
             await callback.message.edit_text("⚠️ Не вдалося знайти заявку для публікації.")
             await callback.answer()
             return
 
         # Витягуємо фото
-        photos = [photo.file_id for photo in first_message.photo]
-        caption = first_message.caption or ""
+        photos = [photo.file_id for photo in message.photo]
+        caption = message.caption or ""
         description_match = re.search(r"<b>Опис:</b>\s*(.*?)(?=\n<b>Соцмережі:</b>|$)", caption, re.DOTALL)
         description = description_match.group(1).strip() if description_match else "Невказано"
         socials_match = re.search(r"<b>Соцмережі:</b>\n(.*?)(?=\n|$)", caption, re.DOTALL)
