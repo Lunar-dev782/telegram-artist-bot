@@ -86,12 +86,12 @@ CATEGORIES = {
 async def cmd_start(message: Message, state: FSMContext):
     await handle_start(message, state)
 
-@router.message(F.text.lower() == "почнімо")
+@router.message(F.text.lower() == "start")
 async def cmd_pochnimo(message: Message, state: FSMContext):
     await handle_start(message, state)
 
 async def handle_start(message: Message, state: FSMContext):
-    logging.info(f"Старт команда від користувача {message.from_user.id}")
+    logging.info(f"start команда від користувача {message.from_user.id}")
     await message.answer(
         "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
         "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
@@ -104,7 +104,7 @@ async def handle_start(message: Message, state: FSMContext):
 
 
 # 🟢 /help
-@router.message(Command("допомога"))
+@router.message(Command("help"))
 async def cmd_help(message: Message):
     logging.info(f"Команда /допомога від користувача {message.from_user.id}")
     help_text = (
@@ -114,13 +114,13 @@ async def cmd_help(message: Message):
         "2️⃣ Виконай умови (репост, підписка, заповнення анкети).\n"
         "3️⃣ Надішли дані одним повідомленням (нік, опис, соцмережі, зображення).\n"
         "4️⃣ Чекай на перевірку адміном.\n\n"
-        "📜 Правила: /правила\n"
+        "📜 Правила: /help\n"
         "📩 Якщо є питання, пиши адмінам: @AdminUsername"
     )
     await message.answer(help_text)
 
 # 🟢 /rules
-@router.message(Command("правила"))
+@router.message(Command("rules"))
 async def cmd_rules(message: Message):
     logging.info(f"Команда /правила від користувача {message.from_user.id}")
     rules_text = (
