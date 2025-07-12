@@ -368,11 +368,21 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
 async def approve_post(callback: CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     parts = callback.data.split(":")
-    user_id = int(parts[1])
+    user_id = int(parts[1])  # Залишаємо int, оскільки user_id у базі — BIGINT
     submission_id = parts[2]
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}, submission_id={submission_id}")
-    # Решта коду залишається без змін
+
     try:
+        # Перевірка існування заявки
+        logging.info(f"Перевірка існування заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
+        check_submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).execute()
+        if not check_submission.data:
+            logging.error(f"Заявка для user_id={user_id}, submission_id={submission_id} не знайдена в таблиці submissions")
+            await callback.message.edit_text("⚠️ Заявку не знайдено в базі даних. Можливо, вона була видалена.")
+            await callback.answer()
+            return
+
+        # Оновлення статусу заявки
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
             "status": "approved",
@@ -380,20 +390,24 @@ async def approve_post(callback: CallbackQuery):
             "moderator_id": callback.from_user.id
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
-    except Exception as e:
-        logging.error(f"Помилка при оновленні статусу в Supabase: {e}")
-        await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
-        await callback.answer()
-        return
 
-    try:
+        if not result.data:
+            logging.warning(f"Оновлення не змінило жодного рядка для user_id={user_id}, submission_id={submission_id}")
+            await callback.message.edit_text("⚠️ Не вдалося оновити статус заявки. Перевірте, чи існує заявка.")
+            await callback.answer()
+            return
+
+        # Додаємо невелику затримку для забезпечення синхронізації
+        await asyncio.sleep(0.5)
+
+        # Повторна перевірка схваленої заявки
         logging.info(f"Отримання схваленої заявки для user_id={user_id}, submission_id={submission_id}")
         submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).eq("status", "approved").execute()
         logging.info(f"Отримані дані заявки: {submission.data}")
 
         if not submission.data:
-            logging.error(f"Не знайдено схваленої заявки для користувача {user_id}, submission_id={submission_id}")
-            await callback.message.edit_text("⚠️ Не вдалося знайти заявку для публікації.")
+            logging.error(f"Схвалена заявка для user_id={user_id}, submission_id={submission_id} не знайдена після оновлення")
+            await callback.message.edit_text("⚠️ Не вдалося знайти схвалену заявку. Можливо, оновлення статусу не відбулося.")
             await callback.answer()
             return
 
@@ -424,8 +438,8 @@ async def approve_post(callback: CallbackQuery):
         await callback.message.edit_text("⚠️ Помилка: бот не має доступу до основного чату.")
         await callback.answer()
     except Exception as e:
-        logging.error(f"Невідома помилка при публікації в основний чат: {e}")
-        await callback.message.edit_text("⚠️ Помилка при публікації в основний чат.")
+        logging.error(f"Невідома помилка при обробці схвалення: {e}")
+        await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
         await callback.answer()
 
 # 🟢 Відхилення посту
