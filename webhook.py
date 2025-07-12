@@ -20,7 +20,8 @@ async def on_startup(app):
         logging.info(f"Поточний вебхук: {webhook_info.url}, pending_updates: {webhook_info.pending_update_count}")
         if not webhook_info.url or webhook_info.url != WEBHOOK_URL + WEBHOOK_PATH:
             await bot.delete_webhook(drop_pending_updates=True)  # Видаляємо старий вебхук
-            await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
+            await asyncio.sleep(1)  # Коротка затримка для уникнення конфліктів
+            await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH, max_connections=1)
             logging.info(f"✅ Webhook встановлено: {WEBHOOK_URL}{WEBHOOK_PATH}")
         else:
             logging.info(f"✅ Webhook вже встановлено: {webhook_info.url}")
