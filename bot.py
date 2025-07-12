@@ -356,10 +356,10 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         }
         result = supabase.table("submissions").insert(submission_data).execute()
         logging.info(f"Результат вставки в Supabase: {result.data}")
-        
+
         # Перевірка, чи заявка була успішно вставлена
         if not result.data:
-            logging.error(f"Не вдалося вставити заявку в Supabase для user_id={user.id}, submission_id={submission_id}")
+            logging.error(f"Не вдалося вставити заявку в Supabase для user_id={user.id}, submission_id={submission_id}. Дані: {submission_data}")
             await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки в базі даних. Зверніться до @AdminUsername.")
             await state.clear()
             return
@@ -378,7 +378,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await state.clear()
     except Exception as e:
         logging.error(f"Помилка при збереженні в Supabase: {e}")
-        await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки. Зверніться до @AdminUsername.")
+        await bot.send_message(user.id, f"⚠️ Виникла помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
         await state.clear()
         return
 
