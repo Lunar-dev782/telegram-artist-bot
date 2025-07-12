@@ -64,6 +64,7 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+
 # 📋 Стан машини
 class Form(StatesGroup):
     category = State()
@@ -344,18 +345,16 @@ async def approve_post(callback: CallbackQuery, state: FSMContext):
     media_message_ids = data.get("media_message_ids", [])
 
     try:
-        # Отримуємо повідомлення з адмін-групи
-        messages = await bot.get_chat_history(chat_id=ADMIN_CHAT_ID, limit=100)
-        target_messages = [msg for msg in messages if hasattr(msg, 'media_group_id') and msg.message_id in media_message_ids]
-        if not target_messages:
-            logging.error(f"Не знайдено повідомлень для submission_id={submission_id}")
+        # Отримуємо перше повідомлення за message_id
+        first_message = await bot.get_message(chat_id=ADMIN_CHAT_ID, message_id=media_message_ids[0])
+        if not first_message or not first_message.photo:
+            logging.error(f"Не знайдено повідомлення для submission_id={submission_id}")
             await callback.message.edit_text("⚠️ Не вдалося знайти заявку для публікації.")
             await callback.answer()
             return
 
-        # Отримуємо фото та текст
-        first_message = target_messages[0]
-        photos = [photo.file_id for photo in first_message.photo] if first_message.photo else []
+        # Витягуємо фото
+        photos = [photo.file_id for photo in first_message.photo]
         caption = first_message.caption or ""
         description_match = re.search(r"<b>Опис:</b>\s*(.*?)(?=\n<b>Соцмережі:</b>|$)", caption, re.DOTALL)
         description = description_match.group(1).strip() if description_match else "Невказано"
