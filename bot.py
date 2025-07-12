@@ -84,7 +84,14 @@ CATEGORIES = {
 # 🟢 /start
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    logging.info(f"Команда /start від користувача {message.from_user.id}")
+    await handle_start(message, state)
+
+@router.message(F.text.lower() == "почнімо")
+async def cmd_pochnimo(message: Message, state: FSMContext):
+    await handle_start(message, state)
+
+async def handle_start(message: Message, state: FSMContext):
+    logging.info(f"Старт команда від користувача {message.from_user.id}")
     await message.answer(
         "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
         "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
@@ -95,26 +102,27 @@ async def cmd_start(message: Message, state: FSMContext):
     )
     await state.set_state(Form.category)
 
+
 # 🟢 /help
-@router.message(Command("help"))
+@router.message(Command("допомога"))
 async def cmd_help(message: Message):
-    logging.info(f"Команда /help від користувача {message.from_user.id}")
+    logging.info(f"Команда /допомога від користувача {message.from_user.id}")
     help_text = (
         "ℹ️ Це бот для подачі заявок на публікацію у спільноті [Назва].\n\n"
         "Як це працює:\n"
-        "1️⃣ Обери категорію через команду /start.\n"
+        "1️⃣ Обери категорію через команду /почнімо.\n"
         "2️⃣ Виконай умови (репост, підписка, заповнення анкети).\n"
         "3️⃣ Надішли дані одним повідомленням (нік, опис, соцмережі, зображення).\n"
         "4️⃣ Чекай на перевірку адміном.\n\n"
-        "📜 Правила: /rules\n"
+        "📜 Правила: /правила\n"
         "📩 Якщо є питання, пиши адмінам: @AdminUsername"
     )
     await message.answer(help_text)
 
 # 🟢 /rules
-@router.message(Command("rules"))
+@router.message(Command("правила"))
 async def cmd_rules(message: Message):
-    logging.info(f"Команда /rules від користувача {message.from_user.id}")
+    logging.info(f"Команда /правила від користувача {message.from_user.id}")
     rules_text = (
         "📜 Правила публікацій:\n"
         "1. Дотримуйтесь умов для обраної категорії.\n"
@@ -126,17 +134,6 @@ async def cmd_rules(message: Message):
         "📩 З питаннями: @AdminUsername"
     )
     await message.answer(rules_text)
-
-# 🟢 Тестування основного чату
-@router.message(Command("test_main_chat"))
-async def test_main_chat(message: Message):
-    try:
-        logging.info(f"Тестування доступу до основного чату {MAIN_CHAT_ID}")
-        await bot.send_message(chat_id=MAIN_CHAT_ID, text="Тестове повідомлення від бота")
-        await message.answer("Тестове повідомлення успішно надіслано в основний чат!")
-    except Exception as e:
-        logging.error(f"Помилка тестування основного чату: {e}")
-        await message.answer(f"Помилка: {e}")
 
 # 🟢 Обробка вибору категорії
 @router.message(lambda message: message.text in CATEGORIES)
@@ -177,15 +174,13 @@ async def handle_category_selection(message: Message, state: FSMContext):
 async def confirm_ready(message: Message, state: FSMContext):
     logging.info(f"Користувач {message.from_user.id} підтвердив виконання умов")
     await message.answer(
-        "📋 Надішли, будь ласка, цю інформацію *одним повідомленням*:\n\n"
-        "1. Ім’я / нікнейм\n"
-        "2. Короткий опис\n"
-        "3. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм)\n\n"
+        "📋 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+        "1. Короткий опис\n"
+        "2. Лінки на соцмережі та сайти (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
         "📌 Приклад:\n"
         "Нік: @Artist\n"
         "Опис: Продаю персонажа, унікальний дизайн!\n"
-        "Соцмережі: Instagram: @artist, Telegram: @artist\n\n"
-        "Після цього надішли до 5 зображень.",
+        "Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
