@@ -365,13 +365,13 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
 
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
-async def approve_post самостоятельно(callback: CallbackQuery):
+async def approve_post(callback: CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     parts = callback.data.split(":")
     user_id = int(parts[1])
     submission_id = parts[2]
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}, submission_id={submission_id}")
-
+    # Решта коду залишається без змін
     try:
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
