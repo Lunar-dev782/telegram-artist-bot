@@ -64,6 +64,26 @@ SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsYmNvdmRlb2Focm14YW9panl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNTc4NTAsImV4cCI6MjA2NzczMzg1MH0.dxwJhTZ9ei4dOnxmCvGztb8pfUqTlprfd0-woF6Y-lY"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+async def check_subscription(user_id: int) -> bool:
+    try:
+        chat_member = await bot.get_chat_member(chat_id=MAIN_CHAT_ID, user_id=user_id)
+        logging.info(f"Статус підписки для user_id={user_id}: {chat_member.status}")
+        return chat_member.status in ["member", "creator", "administrator"]
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка TelegramForbiddenError при перевірці підписки для user_id={user_id}: {e}")
+        return False
+    except TelegramBadRequest as e:
+        logging.error(f"Помилка TelegramBadRequest при перевірці підписки для user_id={user_id}: {e}")
+        return False
+    except TelegramRetryAfter as e:
+        logging.warning(f"Обмеження Telegram API, повтор через {e.retry_after} секунд для user_id={user_id}")
+        await asyncio.sleep(e.retry_after)
+        return False
+    except Exception as e:
+        logging.error(f"Невідома помилка при перевірці підписки для user_id={user_id}: {e}")
+        return False
+
+
 # 📋 Стан машини
 class Form(StatesGroup):
     category = State()
@@ -124,7 +144,9 @@ async def handle_start(message: Message, state: FSMContext):
 
     try:
         # Перевірка підписки на канал
-        if not await check_subscription(user_id):
+        subscription_status = await check_subscription(user_id)
+        logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
+        if not subscription_status:
             await message.answer(
                 "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
                 "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
@@ -149,6 +171,8 @@ async def handle_start(message: Message, state: FSMContext):
         logging.error(f"Помилка в handle_start для user_id={user_id}: {e}")
         await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
 
+
+        
 # 🟢 /help
 @router.message(Command("help"))
 async def cmd_help(message: Message):
