@@ -92,8 +92,48 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cmd_pochnimo(message: Message, state: FSMContext):
     await handle_start(message, state)
 
+@router.message(F.text == "Я підписався(лась)")
+async def check_subscription_again(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if not await check_subscription(user_id):
+        await message.answer(
+            "⚠️ Ви все ще не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і спробуйте ще раз.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    await message.answer(
+        "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
+        "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.category)
+
 async def handle_start(message: Message, state: FSMContext):
-    logging.info(f"start команда від користувача {message.from_user.id}")
+    user_id = message.from_user.id
+    logging.info(f"start команда від користувача {user_id}")
+
+    # Перевірка підписки на канал
+    if not await check_subscription(user_id):
+        await message.answer(
+            "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
     await message.answer(
         "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
         "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
@@ -140,10 +180,24 @@ async def cmd_rules(message: Message):
 # 🟢 Обробка вибору категорії
 @router.message(lambda message: message.text in CATEGORIES)
 async def handle_category_selection(message: Message, state: FSMContext):
-    category = message.text
     user_id = message.from_user.id
+    category = message.text
     logging.info(f"Користувач {user_id} обрав категорію: {category}")
-    
+
+    # Перевірка підписки на канал
+    if not await check_subscription(user_id):
+        await message.answer(
+            "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і спробуйте ще раз.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    # Перевірка частоти подачі заявок
     try:
         last_submission = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).order("submitted_at", desc=True).limit(1).execute()
         if last_submission.data:
@@ -159,18 +213,11 @@ async def handle_category_selection(message: Message, state: FSMContext):
     await state.update_data(category=category)
     await message.answer(
         f"✅ Щоб опублікувати в розділі {category}, виконай наступні кроки:\n\n"
-        f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) в Instagram або Telegram\n"
-        f"✅ Підпишись на [наш канал](https://t.me/channel_link)\n"
+        f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) на будь-якій платформі\n"
         f"📝 Заповни анкету\n\n"
         f"📌 Приклад: {CATEGORIES[category]}\n\n"
-        f"Куди ти зробив(ла) репост?",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Instagram"), KeyboardButton(text="Telegram")],
-                [KeyboardButton(text="Я не робив(ла) репост")]
-            ],
-            resize_keyboard=True
-        ),
+        f"Куди ти зробив(ла) репост? (Наприклад: Instagram, Telegram, Twitter тощо)",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
     await state.set_state(Form.repost_platform)
@@ -178,20 +225,16 @@ async def handle_category_selection(message: Message, state: FSMContext):
 # 🟢 Обробка вибору платформи для репосту
 @router.message(Form.repost_platform)
 async def process_repost_platform(message: Message, state: FSMContext):
-    platform = message.text
+    platform = message.text.strip()
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав платформу для репосту: {platform}")
 
-    if platform == "Я не робив(ла) репост":
+    if not platform or platform.lower() == "я не робив(ла) репост":
         await message.answer(
-            "🔄 Будь ласка, зроби репост [нашої спільноти](https://t.me/community_link) в Instagram або Telegram, "
-            "а потім вибери платформу ще раз.",
+            "🔄 Будь ласка, зроби репост [нашої спільноти](https://t.me/community_link) на будь-якій платформі, "
+            "а потім вкажи назву платформи ще раз.",
             parse_mode="Markdown"
         )
-        return
-
-    if platform not in ["Instagram", "Telegram"]:
-        await message.answer("⚠️ Будь ласка, вибери одну з запропонованих платформ: Instagram або Telegram.")
         return
 
     await state.update_data(repost_platform=platform)
@@ -204,14 +247,19 @@ async def process_repost_platform(message: Message, state: FSMContext):
 # 🟢 Обробка посилання на репост
 @router.message(Form.repost_link)
 async def process_repost_link(message: Message, state: FSMContext):
-    repost_link = message.text
+    repost_link = message.text.strip()
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} надіслав посилання на репост: {repost_link}")
 
-    # Базова перевірка формату посилання
-    if not (repost_link.startswith("https://www.instagram.com/") or repost_link.startswith("https://t.me/")):
+    # Перевірка формату URL
+    url_pattern = re.compile(
+        r'^(https?://)?'  # Протокол (http:// або https://)
+        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'  # Домен
+        r'(/.*)?$'  # Шлях (опціонально)
+    )
+    if not url_pattern.match(repost_link):
         await message.answer(
-            "⚠️ Посилання виглядає некоректним. Будь ласка, надішли правильне посилання на репост у Instagram або Telegram."
+            "⚠️ Посилання виглядає некоректним. Будь ласка, надішли правильне посилання на репост (наприклад, https://www.instagram.com/..., https://t.me/...)."
         )
         return
 
