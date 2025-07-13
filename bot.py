@@ -95,10 +95,11 @@ async def cmd_pochnimo(message: Message, state: FSMContext):
 @router.message(F.text == "Я підписався(лась)")
 async def check_subscription_again(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} повторно перевіряє підписку")
     if not await check_subscription(user_id):
         await message.answer(
             "⚠️ Ви все ще не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
-            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і спробуйте ще раз.",
+            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
@@ -121,28 +122,32 @@ async def handle_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"start команда від користувача {user_id}")
 
-    # Перевірка підписки на канал
-    if not await check_subscription(user_id):
+    try:
+        # Перевірка підписки на канал
+        if not await check_subscription(user_id):
+            await message.answer(
+                "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+                "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
         await message.answer(
-            "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
-            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
-            parse_mode="Markdown",
+            "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
+            "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
                 resize_keyboard=True
             )
         )
-        return
-
-    await message.answer(
-        "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
-        "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.category)
+        await state.set_state(Form.category)
+    except Exception as e:
+        logging.error(f"Помилка в handle_start для user_id={user_id}: {e}")
+        await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
 
 # 🟢 /help
 @router.message(Command("help"))
@@ -544,7 +549,12 @@ async def debug_callback(callback: CallbackQuery):
 # 🟢 Обробка помилок
 @dp.errors()
 async def error_handler(update, exception):
-    logging.exception(f"Виникла помилка при обробці оновлення {update.update_id if update else 'невідоме'}: {exception}")
-    if update and hasattr(update, 'callback_query'):
-        await update.callback_query.answer("⚠️ Виникла помилка. Спробуйте ще раз.")
+    logging.exception(f"Виникла помилка при обробці оновлення {getattr(update, 'update_id', 'невідоме')}: {exception}")
+    try:
+        if update and hasattr(update, 'callback_query'):
+            await update.callback_query.answer("⚠️ Виникла помилка. Спробуйте ще раз.")
+        elif update and hasattr(update, 'message'):
+            await update.message.answer("⚠️ Виникла помилка при обробці вашого запиту. Спробуйте ще раз або зверніться до @AdminUsername.")
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні повідомлення про помилку: {e}")
     return True
