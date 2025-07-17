@@ -76,18 +76,6 @@ class Form(StatesGroup):
     question = State()         # Надсилання питання адмінам
     answer = State()           # Введення відповіді адміном
 
-# 📋 Категорії та їх описи
-CATEGORIES = {
-    "💸 Платні послуги": "Коміші, прайси, реклама. Репост обов’язковий.",
-    "📣 Самопіар": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.",
-    "🎭 Активності": "Івенти, конкурси, лотереї, DTIYS (Draw This In Your Style).",
-    "🔍 Пошук критика / притика": "Шукаєш фідбек? Тобі сюди.",
-    "📩 Оголошення / звернення": "Обговорення, звернення — без зображень. Репост не обов’язковий.",
-    "➕ Інше": "Щось, що не вмістилось в інші категорії.",
-    "🐾 Адопти": "Пости про персонажів, яких ви пропонуєте для адопції.",
-    "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
-}
-
 # 🟢 Фонова задача для видалення старих заявок
 async def cleanup_old_submissions():
     while True:
@@ -99,6 +87,10 @@ async def cleanup_old_submissions():
         except Exception as e:
             logging.error(f"Помилка при очищенні старих заявок: {e}")
         await asyncio.sleep(3600)  # Перевірка кожну годину
+
+# 🟢 Запуск фонової задачі при старті
+async def on_startup():
+    asyncio.create_task(cleanup_old_submissions())
 
 # 🟢 Перевірка підписки на канал
 async def check_subscription(user_id: int) -> bool:
@@ -119,6 +111,364 @@ async def check_subscription(user_id: int) -> bool:
     except Exception as e:
         logging.error(f"Невідома помилка при перевірці підписки для user_id={user_id}: {e}")
         return False
+
+# 🟢 Головне меню
+async def show_main_menu(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Показ головного меню для користувача {user_id}")
+
+    try:
+        # Перевірка підписки
+        subscription_status = await check_subscription(user_id)
+        logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
+        if not subscription_status:
+            await message.answer(
+                "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+                "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        await message.answer(
+            "🎨 Вітаємо в боті спільноти *Митці ЮА*! Оберіть дію:",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                    [KeyboardButton(text="❓ Інші питання")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.main_menu)
+    except Exception as e:
+        logging.error(f"Помилка в show_main_menu для user_id={user_id}: {e}")
+        await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
+
+# 🟢 /start
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+@router.message(F.text.lower() == "start")
+async def cmd_pochnimo(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+@router.message(F.text == "Я підписався(лась)")
+async def check_subscription_again(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+# 🟢 Обробка головного меню
+@router.message(Form.main_menu, F.text == "📜 Правила")
+@router.message(Command("rules"))
+async def cmd_rules(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Команда або кнопка /правила від користувача {user_id}")
+    rules_text = (
+        "📖 Ознайомся з основними правилами спільноти *Митці ЮА*:\n\n"
+        "📜 Правила публікацій:\n"
+        "1. Дотримуйтесь умов для обраної категорії.\n"
+        "2. Надсилайте лише оригінальний контент.\n"
+        "3. Не більше 5 зображень на пост.\n"
+        "4. Публікації дозволені не частіше, ніж 2 пости на 7 днів.\n"
+        "5. Зробіть репост нашої спільноти в соцмережі або надішліть друзям.\n"
+        "6. Заборонено NSFW, образливий або незаконний контент.\n"
+        "7. Адміни мають право відхилити заявку з поясненням.\n\n"
+        "📩 З питаннями: @AdminUsername\n"
+        "👉 [Докладні правила](https://telegra.ph/Pravyla-Mytci-UA)"
+    )
+    await message.answer(
+        rules_text,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+
+# 🟢 Обробка "Запропонувати пост"
+@router.message(Form.main_menu, F.text == "📝 Запропонувати пост")
+async def handle_propose_post(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Запропонувати пост'")
+
+    try:
+        # Перевірка частоти подачі заявок (до 2 постів за 7 днів)
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        recent_submissions = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).gte("submitted_at", seven_days_ago).execute()
+        if len(recent_submissions.data) >= 2:
+            await message.answer(
+                "⚠️ Ви можете подавати не більше 2 заявок на 7 днів. Спробуйте пізніше!",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        await message.answer(
+            "🎨 Обери категорію для публікації:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()] + [[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.category)
+    except Exception as e:
+        logging.error(f"Помилка в handle_propose_post для user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+# 🟢 Обробка "Інші питання"
+@router.message(Form.main_menu, F.text == "❓ Інші питання")
+async def handle_other_questions(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Інші питання'")
+    await message.answer(
+        f"❓ Якщо у вас є питання — напишіть його тут, і наші адміни дадуть відповідь протягом доби.\n\n"
+        f"📩 Також можете звернутись напряму:\n{' • '.join(ADMIN_CONTACTS)}",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        ),
+        parse_mode="Markdown"
+    )
+    await state.set_state(Form.question)
+
+# 🟢 Обробка питань до адмінів
+@router.message(Form.question)
+async def process_question(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    question = message.text.strip()
+    logging.info(f"Користувач {user_id} надіслав питання: {question}")
+
+    if question == "⬅️ Назад":
+        await show_main_menu(message, state)
+        return
+
+    if not question:
+        await message.answer(
+            "⚠️ Будь ласка, напишіть ваше питання.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        # Генерація унікального ID для питання
+        question_id = str(uuid.uuid4())
+        # Збереження питання в Supabase
+        question_data = {
+            "question_id": question_id,
+            "user_id": user_id,
+            "username": message.from_user.first_name,
+            "question_text": question,
+            "status": "pending",
+            "submitted_at": datetime.utcnow().isoformat()
+        }
+        result = supabase.table("questions").insert(question_data).execute()
+        logging.info(f"Питання збережено в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося зберегти питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer(
+                "⚠️ Виникла помилка при збереженні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        # Формування повідомлення з клікабельним ім’ям
+        username = message.from_user.first_name
+        user_link = f'<a href="tg://user?id={user_id}">{username}</a>'
+        question_message = (
+            f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
+            f"{question}"
+        )
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
+        markup = keyboard.as_markup()
+
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=question_message,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+        await message.answer(
+            "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.main_menu)
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні питання до адмінів від user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка при надсиланні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+# 🟢 Обробка натискання кнопки "Відповісти"
+@router.callback_query(lambda c: c.data.startswith("answer:"))
+async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    question_id = parts[2]
+    logging.info(f"Адмін {callback.from_user.id} натиснув 'Відповісти' для user_id={user_id}, question_id={question_id}")
+
+    try:
+        # Перевірка існування питання
+        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
+        if not question.data or question.data[0]["status"] != "pending":
+            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
+            await callback.answer()
+            return
+
+        await callback.message.answer(
+            f"✉️ Напишіть відповідь для користувача (ID: {user_id}):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        await state.update_data(user_id=user_id, question_id=question_id)
+        await state.set_state(Form.answer)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {e}")
+        await callback.message.edit_text("⚠️ Помилка при обробці питання. Зверніться до розробника.")
+        await callback.answer()
+
+# 🟢 Обробка відповіді адміна
+@router.message(Form.answer)
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
+    logging.info(f"Адмін {admin_id} надіслав відповідь для user_id={user_id}, question_id={question_id}: {answer_text}")
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer(
+            "✅ Обробку відповіді скасовано.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+        return
+
+    if not answer_text:
+        await message.answer(
+            "⚠️ Будь ласка, напишіть текст відповіді.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        # Надсилання відповіді користувачу
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ Відповідь від адміна: {answer_text}"
+        )
+        # Оновлення статусу питання в Supabase
+        result = supabase.table("questions").update({
+            "status": "answered",
+            "answered_at": datetime.utcnow().isoformat(),
+            "admin_id": admin_id,
+            "answer_text": answer_text
+        }).eq("question_id", question_id).eq("user_id", user_id).execute()
+        logging.info(f"Оновлення статусу питання в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося оновити питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer("⚠️ Помилка при збереженні відповіді. Спробуйте ще раз.")
+            return
+
+        # Оновлення повідомлення в адмінському чаті
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}"
+        )
+        await message.answer(
+            "✅ Відповідь успішно надіслано користувачу!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні відповіді для user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка при надсиланні відповіді. Спробуйте ще раз або зверніться до розробника.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+
+# 🟢 Обробка повернення до головного меню
+@router.message(F.text == "⬅️ Назад")
+async def handle_back(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+# 🟢 /help
+@router.message(Command("help"))
+async def cmd_help(message: Message, state: FSMContext):
+    logging.info(f"Команда /допомога від користувача {message.from_user.id}")
+    help_text = (
+        "ℹ️ Це бот для подачі заявок на публікацію у спільноті *Митці ЮА*.\n\n"
+        "Як це працює:\n"
+        "1️⃣ Обери дію в головному меню після /start.\n"
+        "2️⃣ Для публікації: вибери категорію, виконай умови (репост або надсилання друзям, підписка, заповнення анкети).\n"
+        "3️⃣ Надішли дані одним повідомленням (опис, соцмережі, зображення — якщо потрібно).\n"
+        "4️⃣ Чекай на перевірку адміном.\n\n"
+        "📜 Правила: /rules\n"
+        f"📩 З питаннями: {' • '.join(ADMIN_CONTACTS)}"
+    )
+    await message.answer(
+        help_text,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+
+# 📋 Категорії та їх описи
+CATEGORIES = {
+    "💸 Платні послуги": "Коміші, прайси, реклама. Репост обов’язковий.",
+    "📣 Самопіар": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.",
+    "🎭 Активності": "Івенти, конкурси, лотереї, DTIYS (Draw This In Your Style).",
+    "🔍 Пошук критика / притика": "Шукаєш фідбек? Тобі сюди.",
+    "📩 Оголошення / звернення": "Обговорення, звернення — без зображень. Репост не обов’язковий.",
+    "➕ Інше": "Щось, що не вмістилось в інші категорії.",
+    "🐾 Адопти": "Пости про персонажів, яких ви пропонуєте для адопції.",
+    "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
+}
 
 # 🟢 Обробка вибору категорії
 @router.message(Form.category, lambda message: message.text in CATEGORIES)
