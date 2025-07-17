@@ -635,12 +635,12 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         await show_main_menu(message, state)
         return
 
-    if not message.text or len(message.text.split('\n')) < 2:
+    if not message.text:
         await message.answer(
-            "⚠️ Будь ласка, надішли всю інформацію одним повідомленням:\n"
-            "1. Короткий опис\n"
-            "2. Лінки на соцмережі\n\n"
-            "Спробуй ще раз.",
+            "⚠️ Будь ласка, надішли текст із описом та соцмережами.\n\n"
+            "Приклад:\n"
+            "Опис: Продаю персонажа, унікальний дизайн!\n"
+            "Соцмережі: Instagram: @artist, Telegram: @artist",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -649,9 +649,45 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         return
 
     try:
-        lines = message.text.split('\n')
-        description = lines[0].strip()
-        socials = '\n'.join(lines[1:]).strip()
+        # Очищення тексту: видаляємо порожні рядки та пробіли
+        lines = [line.strip() for line in message.text.split('\n') if line.strip()]
+        logging.info(f"Очищені рядки анкети: {lines}")
+
+        # Перевірка, чи є хоча б 2 непорожні рядки (опис + хоча б одна соцмережа)
+        if len(lines) < 2:
+            await message.answer(
+                "⚠️ Недостатньо даних. Надішли, будь ласка, одним повідомленням:\n"
+                "1. Короткий опис (хоча б один рядок)\n"
+                "2. Лінки на соцмережі (хоча б одна соцмережа)\n\n"
+                "Приклад:\n"
+                "Опис: Продаю персонажа, унікальний дизайн!\n"
+                "Соцмережі: Instagram: @artist, Telegram: @artist",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        # Перший непорожній рядок — опис, решта — соцмережі
+        description = lines[0]
+        socials = '\n'.join(lines[1:])
+
+        # Перевірка, чи є в соцмережах хоча б один валідний формат (наприклад, @нік або URL)
+        socials_pattern = re.compile(r'(@[a-zA-Z0-9_]+|https?://[^\s]+)')
+        if not socials_pattern.search(socials):
+            await message.answer(
+                "⚠️ Некоректний формат соцмереж. Додай хоча б одну соцмережу у форматі:\n"
+                "Instagram: @нік, Telegram: @нікнейм або Site: https://blablabla\n\n"
+                "Приклад:\n"
+                "Опис: Продаю персонажа, унікальний дизайн!\n"
+                "Соцмережі: Instagram: @artist, Telegram: @artist",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
 
         await state.update_data(description=description, socials=socials)
         await message.answer(
@@ -664,13 +700,13 @@ async def get_description_and_socials(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
-        await state.set_state(Form.description)  # Залишаємося в стані, щоб обробити вибір
+        await state.set_state(Form.description)  # Залишаємося в стані для обробки вибору
     except Exception as e:
         logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {e}")
         await message.answer(
-            "⚠️ Помилка формату повідомлення. Переконайся, що ти надіслав усі дані коректно:\n"
+            "⚠️ Помилка обробки даних. Переконайся, що ти надіслав:\n"
             "1. Короткий опис\n"
-            "2. Лінки на соцмережі\n\n"
+            "2. Лінки на соцмережі (наприклад, Instagram: @нік)\n\n"
             "Спробуй ще раз.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
@@ -683,10 +719,31 @@ async def get_description_and_socials(message: Message, state: FSMContext):
 async def submit_without_photos(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+    data = await state.get_data()
+    if not data.get("description") or not data.get("socials"):
+        await message.answer(
+            "⚠️ Спочатку надішли опис та соцмережі одним повідомленням.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
     await finish_submission(message.from_user, state, photos=[])
 
 @router.message(Form.description, F.text == "Додати фото")
 async def add_photos(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    data = await state.get_data()
+    if not data.get("description") or not data.get("socials"):
+        await message.answer(
+            "⚠️ Спочатку надішли опис та соцмережі одним повідомленням.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
     await message.answer(
         "📸 Надішли до 5 зображень для публікації",
         reply_markup=ReplyKeyboardMarkup(
@@ -805,11 +862,11 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "media_message_ids": media_message_ids
         }
         result = supabase.table("submissions").insert(submission_data).execute()
-        logging.info(f"Результат вставки в Supabase: {result.data}")
+        logging.info(f"Результат вставки в Supabase (submissions): {result.data}")
 
         # Перевірка, чи заявка була успішно вставлена
         if not result.data:
-            logging.error(f"Не вдалося вставити заявку в Supabase для user_id={user.id}, submission_id={submission_id}. Дані: {submission_data}")
+            logging.error(f"Не вдалося вставити заявку в Supabase (submissions) для user_id={user.id}, submission_id={submission_id}. Дані: {submission_data}")
             await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки в базі даних. Зверніться до @AdminUsername.")
             await state.clear()
             return
@@ -823,11 +880,27 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             await state.clear()
             return
 
+        # Збереження дії в submission_history
+        try:
+            history_data = {
+                "user_id": user.id,
+                "submission_id": submission_id,
+                "action": "submission_created",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            history_result = supabase.table("submission_history").insert(history_data).execute()
+            logging.info(f"Результат вставки в Supabase (submission_history): {history_result.data}")
+            if not history_result.data:
+                logging.error(f"Не вдалося вставити запис у submission_history для user_id={user.id}, submission_id={submission_id}")
+                # Не перериваємо виконання, але логуємо помилку
+        except Exception as e:
+            logging.error(f"Помилка при збереженні в submission_history для user_id={user.id}, submission_id={submission_id}: {e}")
+
         logging.info(f"Заявка успішно збережена в Supabase")
         await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
         await state.clear()
     except Exception as e:
-        logging.error(f"Помилка при збереженні в Supabase: {e}")
+        logging.error(f"Помилка при збереженні в Supabase (submissions): {e}")
         await bot.send_message(user.id, f"⚠️ Виникла помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
         await state.clear()
         return
@@ -902,6 +975,19 @@ async def approve_post(callback: CallbackQuery):
         else:
             await bot.send_message(chat_id=MAIN_CHAT_ID, text=post_text, parse_mode="HTML")
 
+        # Збереження дії в submission_history
+        try:
+            history_data = {
+                "user_id": user_id,
+                "submission_id": submission_id,
+                "action": "submission_approved",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            history_result = supabase.table("submission_history").insert(history_data).execute()
+            logging.info(f"Результат вставки в Supabase (submission_history, approve): {history_result.data}")
+        except Exception as e:
+            logging.error(f"Помилка при збереженні в submission_history (approve) для user_id={user_id}, submission_id={submission_id}: {e}")
+
         await callback.message.edit_text("✅ Публікацію схвалено та опубліковано в основному чаті!")
         await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
         await callback.answer()
@@ -941,6 +1027,20 @@ async def reject_post(callback: CallbackQuery):
             "repost_link": None
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
+
+        # Збереження дії в submission_history
+        try:
+            history_data = {
+                "user_id": user_id,
+                "submission_id": submission_id,
+                "action": "submission_rejected",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            history_result = supabase.table("submission_history").insert(history_data).execute()
+            logging.info(f"Результат вставки в Supabase (submission_history, reject): {history_result.data}")
+        except Exception as e:
+            logging.error(f"Помилка при збереженні в submission_history (reject) для user_id={user_id}, submission_id={submission_id}: {e}")
+
         await callback.message.edit_text("❌ Публікацію відхилено.")
         await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
         await callback.answer()
