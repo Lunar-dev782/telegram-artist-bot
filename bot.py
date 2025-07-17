@@ -74,16 +74,20 @@ class Form(StatesGroup):
     description = State()      # Введення опису та соцмереж
     images = State()           # Завантаження зображень
     question = State()         # Надсилання питання адмінам
+    answer = State()           # Введення відповіді адміном
 
 # 📋 Категорії та їх описи
 CATEGORIES = {
     "💸 Платні послуги": "Коміші, прайси, реклама. Репост обов’язковий.",
-    "📣 Самопіар": "Промоція блогу або себе. Репост обов’язковий.",
-    "🎭 Активності": "Івенти, конкурси, лотереї.",
+    "📣 Самопіар": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.",
+    "🎭 Активності": "Івенти, конкурси, лотереї, DTIYS (Draw This In Your Style).",
     "🔍 Пошук критика / притика": "Шукаєш фідбек? Тобі сюди.",
     "📩 Оголошення / звернення": "Обговорення, звернення — без зображень. Репост не обов’язковий.",
-    "➕ Інше": "Щось, що не вмістилось в інші категорії"
+    "➕ Інше": "Щось, що не вмістилось в інші категорії.",
+    "🐾 Адопти": "Пости про персонажів, яких ви пропонуєте для адопції.",
+    "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
 }
+
 # 🟢 Перевірка підписки на канал
 async def check_subscription(user_id: int) -> bool:
     try:
@@ -259,13 +263,47 @@ async def process_question(message: Message, state: FSMContext):
         return
 
     try:
+        # Генерація унікального ID для питання
+        question_id = str(uuid.uuid4())
+        # Збереження питання в Supabase
+        question_data = {
+            "question_id": question_id,
+            "user_id": user_id,
+            "username": message.from_user.username or message.from_user.first_name,
+            "question_text": question,
+            "status": "pending",
+            "submitted_at": datetime.utcnow().isoformat()
+        }
+        result = supabase.table("questions").insert(question_data).execute()
+        logging.info(f"Питання збережено в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося зберегти питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer(
+                "⚠️ Виникла помилка при збереженні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        # Формування повідомлення з клікабельним ім’ям
+        username = message.from_user.username or message.from_user.first_name
+        user_link = f'<a href="tg://user?id={user_id}">{username}</a>'
+        question_message = (
+            f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
+            f"{question}"
+        )
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
+        markup = keyboard.as_markup()
+
         await bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=(
-                f"❓ Нове питання від @{message.from_user.username or message.from_user.first_name} (ID: {user_id}):\n\n"
-                f"{question}\n\n"
-                f"Відповісти: /answer_{user_id}"
-            )
+            text=question_message,
+            parse_mode="HTML",
+            reply_markup=markup
         )
         await message.answer(
             "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
@@ -284,6 +322,110 @@ async def process_question(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+
+# 🟢 Обробка натискання кнопки "Відповісти"
+@router.callback_query(lambda c: c.data.startswith("answer:"))
+async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    question_id = parts[2]
+    logging.info(f"Адмін {callback.from_user.id} натиснув 'Відповісти' для user_id={user_id}, question_id={question_id}")
+
+    try:
+        # Перевірка існування питання
+        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
+        if not question.data or question.data[0]["status"] != "pending":
+            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
+            await callback.answer()
+            return
+
+        await callback.message.answer(
+            f"✉️ Напишіть відповідь для користувача (ID: {user_id}):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        await state.update_data(user_id=user_id, question_id=question_id)
+        await state.set_state(Form.answer)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {e}")
+        await callback.message.edit_text("⚠️ Помилка при обробці питання. Зверніться до розробника.")
+        await callback.answer()
+
+# 🟢 Обробка відповіді адміна
+@router.message(Form.answer)
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
+    logging.info(f"Адмін {admin_id} надіслав відповідь для user_id={user_id}, question_id={question_id}: {answer_text}")
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer(
+            "✅ Обробку відповіді скасовано.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+        return
+
+    if not answer_text:
+        await message.answer(
+            "⚠️ Будь ласка, напишіть текст відповіді.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        # Надсилання відповіді користувачу
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ Відповідь від адміна: {answer_text}"
+        )
+        # Оновлення статусу питання в Supabase
+        result = supabase.table("questions").update({
+            "status": "answered",
+            "answered_at": datetime.utcnow().isoformat(),
+            "admin_id": admin_id,
+            "answer_text": answer_text
+        }).eq("question_id", question_id).eq("user_id", user_id).execute()
+        logging.info(f"Оновлення статусу питання в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося оновити питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer("⚠️ Помилка при збереженні відповіді. Спробуйте ще раз.")
+            return
+
+        # Оновлення повідомлення в адмінському чаті
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}"
+        )
+        await message.answer(
+            "✅ Відповідь успішно надіслано користувачу!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні відповіді для user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка при надсиланні відповіді. Спробуйте ще раз або зверніться до розробника.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
 
 # 🟢 Обробка повернення до головного меню
 @router.message(F.text == "⬅️ Назад")
@@ -597,14 +739,14 @@ async def done_images(message: Message, state: FSMContext):
     await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos)
 
-# ✅ Фінальна обробка
+# ✅ Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
     logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
 
     text = (
-        f"📥 <b>Нова заявка від</b> @{user.username or user.first_name}\n"
+        f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
         f"<b>Категорія:</b> {data['category']}\n"
         f"<b>Спосіб поширення:</b> {data.get('repost_platform', 'Невказано')}\n"
         f"<b>Посилання на допис:</b> {data.get('repost_link', 'Невказано')}\n"
@@ -621,11 +763,6 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     else:
         media = None
 
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}:{submission_id}")
-    keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}:{submission_id}")
-    markup = keyboard.as_markup()
-
     try:
         logging.info(f"Надсилання заявки в адмінський чат {ADMIN_CHAT_ID}")
         if media:
@@ -635,6 +772,11 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             media_message_ids = []
             media_message = await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode="HTML")
             media_message_ids.append(media_message.message_id)
+
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}:{submission_id}")
+        keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}:{submission_id}")
+        markup = keyboard.as_markup()
 
         await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
     except TelegramBadRequest as e:
@@ -751,7 +893,7 @@ async def approve_post(callback: CallbackQuery):
             f"📢 <b>{data['category']}</b>\n\n"
             f"{data['description']}\n\n"
             f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
-            f"👤 Від: @{data['username']}\n"
+            f"👤 Від: <a href=\"tg://user?id={user_id}\">{data['username']}</a>\n"
             f"#public"
         )
 
