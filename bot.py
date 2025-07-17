@@ -88,6 +88,18 @@ CATEGORIES = {
     "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
 }
 
+# 🟢 Фонова задача для видалення старих заявок
+async def cleanup_old_submissions():
+    while True:
+        try:
+            logging.info("Запуск задачі очищення старих заявок")
+            seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+            result = supabase.table("submissions").delete().lt("submitted_at", seven_days_ago).execute()
+            logging.info(f"Видалено {len(result.data)} заявок, старших за 7 днів")
+        except Exception as e:
+            logging.error(f"Помилка при очищенні старих заявок: {e}")
+        await asyncio.sleep(3600)  # Перевірка кожну годину
+
 # 🟢 Перевірка підписки на канал
 async def check_subscription(user_id: int) -> bool:
     try:
@@ -145,6 +157,10 @@ async def show_main_menu(message: Message, state: FSMContext):
         logging.error(f"Помилка в show_main_menu для user_id={user_id}: {e}")
         await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
 
+# 🟢 Запуск фонової задачі очищення
+async def on_startup():
+    asyncio.create_task(cleanup_old_submissions())
+
 # 🟢 /start
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
@@ -170,7 +186,7 @@ async def cmd_rules(message: Message, state: FSMContext):
         "1. Дотримуйтесь умов для обраної категорії.\n"
         "2. Надсилайте лише оригінальний контент.\n"
         "3. Не більше 5 зображень на пост.\n"
-        "4. Публікації дозволені не частіше, ніж раз на 7 днів.\n"
+        "4. Публікації дозволені не частіше, ніж 2 пости на 7 днів.\n"
         "5. Зробіть репост нашої спільноти в соцмережі або надішліть друзям.\n"
         "6. Заборонено NSFW, образливий або незаконний контент.\n"
         "7. Адміни мають право відхилити заявку з поясненням.\n\n"
@@ -193,19 +209,18 @@ async def handle_propose_post(message: Message, state: FSMContext):
     logging.info(f"Користувач {user_id} обрав 'Запропонувати пост'")
 
     try:
-        # Перевірка частоти подачі заявок
-        last_submission = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).order("submitted_at", desc=True).limit(1).execute()
-        if last_submission.data:
-            last_time = datetime.fromisoformat(last_submission.data[0]["submitted_at"].replace("Z", "+00:00"))
-            if datetime.utcnow() - last_time < timedelta(days=7):
-                await message.answer(
-                    "⚠️ Ви можете подавати заявку не частіше, ніж раз на 7 днів. Спробуйте пізніше!",
-                    reply_markup=ReplyKeyboardMarkup(
-                        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                        resize_keyboard=True
-                    )
+        # Перевірка частоти подачі заявок (до 2 постів за 7 днів)
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        recent_submissions = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).gte("submitted_at", seven_days_ago).execute()
+        if len(recent_submissions.data) >= 2:
+            await message.answer(
+                "⚠️ Ви можете подавати не більше 2 заявок на 7 днів. Спробуйте пізніше!",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
                 )
-                return
+            )
+            return
 
         await message.answer(
             "🎨 Обери категорію для публікації:",
@@ -686,7 +701,6 @@ async def get_description_and_socials(message: Message, state: FSMContext):
 async def submit_without_photos(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-    await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos=[])
 
 @router.message(Form.description, F.text == "Додати фото")
@@ -709,7 +723,6 @@ async def get_images(message: Message, state: FSMContext):
     logging.info(f"Користувач {message.from_user.id} надіслав зображення: {message.photo[-1].file_id}")
 
     if len(photos) >= 5:
-        await message.answer("✅ Дякую! Надіслано на перевірку.")
         await finish_submission(message.from_user, state, photos)
     else:
         await state.update_data(photos=photos)
@@ -736,7 +749,6 @@ async def done_images(message: Message, state: FSMContext):
             )
         )
         return
-    await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos)
 
 # ✅ Фінальна обробка заявки
@@ -859,12 +871,18 @@ async def approve_post(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # Оновлення статусу заявки
+        # Оновлення статусу заявки та очищення даних
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
             "status": "approved",
             "moderated_at": datetime.utcnow().isoformat(),
-            "moderator_id": callback.from_user.id
+            "moderator_id": callback.from_user.id,
+            "description": None,
+            "socials": None,
+            "images": None,
+            "repost_platform": None,
+            "repost_link": None,
+            "nickname": None
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
 
@@ -891,8 +909,8 @@ async def approve_post(callback: CallbackQuery):
         data = submission.data[0]
         post_text = (
             f"📢 <b>{data['category']}</b>\n\n"
-            f"{data['description']}\n\n"
-            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
+            f"{data['description'] or 'Опис відсутній'}\n\n"
+            f"🌐 <b>Соцмережі:</b>\n{data['socials'] or 'Невказано'}\n"
             f"👤 Від: <a href=\"tg://user?id={user_id}\">{data['username']}</a>\n"
             f"#public"
         )
@@ -936,7 +954,13 @@ async def reject_post(callback: CallbackQuery):
             "status": "rejected",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id,
-            "rejection_reason": "Невідповідність вимогам"
+            "rejection_reason": "Невідповідність вимогам",
+            "description": None,
+            "socials": None,
+            "images": None,
+            "repost_platform": None,
+            "repost_link": None,
+            "nickname": None
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
@@ -971,3 +995,6 @@ async def error_handler(update, exception):
     except Exception as e:
         logging.error(f"Помилка при надсиланні повідомлення про помилку: {e}")
     return True
+
+# Запуск фонової задачі при старті
+dp.startup.register(on_startup)
