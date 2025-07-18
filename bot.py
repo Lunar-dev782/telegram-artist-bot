@@ -295,7 +295,7 @@ async def process_question(message: Message, state: FSMContext):
         if not result.data:
             logging.error(f"Не вдалося зберегти питання в Supabase для user_id={user_id}, question_id={question_id}")
             await message.answer(
-                "⚠️ Виникла помилка при збереженні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+                "⚠️ Помилка при збереженні питання в базі даних. Спробуйте ще раз або зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                     resize_keyboard=True
@@ -314,12 +314,49 @@ async def process_question(message: Message, state: FSMContext):
         keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
         markup = keyboard.as_markup()
 
-        await bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=question_message,
-            parse_mode="HTML",
-            reply_markup=markup
-        )
+        # Перевірка доступу до адмінського чату
+        try:
+            chat = await bot.get_chat(ADMIN_CHAT_ID)
+            logging.info(f"Адмінський чат доступний: {chat.id}")
+        except TelegramForbiddenError as e:
+            logging.error(f"Бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {e}")
+            await message.answer(
+                "⚠️ Бот не може надіслати питання до адмінів (немає доступу до чату). Зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+        except TelegramBadRequest as e:
+            logging.error(f"Помилка при перевірці адмінського чату {ADMIN_CHAT_ID}: {e}")
+            await message.answer(
+                "⚠️ Помилка при перевірці адмінського чату. Зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        # Спроба надсилання повідомлення до адмінів
+        try:
+            await bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=question_message,
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+        except TelegramRetryAfter as e:
+            logging.warning(f"Обмеження Telegram API, повтор через {e.retry_after} секунд для user_id={user_id}")
+            await asyncio.sleep(e.retry_after)
+            await bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=question_message,
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+
         await message.answer(
             "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
             reply_markup=ReplyKeyboardMarkup(
@@ -329,9 +366,9 @@ async def process_question(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
     except Exception as e:
-        logging.error(f"Помилка при надсиланні питання до адмінів від user_id={user_id}: {e}")
+        logging.error(f"Помилка при обробці питання від user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Виникла помилка при надсиланні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+            f"⚠️ Виникла помилка при надсиланні питання: {str(e)}. Спробуйте ще раз або зверніться до @AdminUsername.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -659,29 +696,17 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         socials = '\n'.join(lines[2:]).strip()
 
         await state.update_data(nickname=nickname, description=description, socials=socials)
-        data = await state.get_data()
-        category = data.get("category", "")
-
-        if category == "📩 Оголошення / звернення":
-            await message.answer(
-                "📸 Хочете додати зображення до заявки? Оберіть варіант:",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="Надіслати без фото"), KeyboardButton(text="Додати фото")],
-                        [KeyboardButton(text="⬅️ Назад")]
-                    ],
-                    resize_keyboard=True
-                )
+        await message.answer(
+            "📸 Хочете додати зображення до заявки? Оберіть варіант:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Надіслати без фото"), KeyboardButton(text="Додати фото")],
+                    [KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
             )
-        else:
-            await message.answer(
-                "📸 Надішли до 5 зображень для публікації",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            await state.set_state(Form.images)
+        )
+        await state.set_state(Form.images)
     except Exception as e:
         logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {e}")
         await message.answer(
@@ -696,23 +721,13 @@ async def get_description_and_socials(message: Message, state: FSMContext):
             )
         )
 
-# 🟢 Обробка вибору для "Оголошення / звернення"
-@router.message(Form.description, F.text == "Надіслати без фото")
-async def submit_without_photos(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-    await finish_submission(message.from_user, state, photos=[])
+@router.message(Form.images, F.text == "/done")
+async def done_images(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    category = data.get("category", "")
+    logging.info(f"Кори
 
-@router.message(Form.description, F.text == "Додати фото")
-async def add_photos(message: Message, state: FSMContext):
-    await message.answer(
-        "📸 Надішли до 5 зображень для публікації",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.images)
 
 # 🟢 Фото
 @router.message(Form.images, F.photo)
@@ -739,18 +754,12 @@ async def get_images(message: Message, state: FSMContext):
 async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
-    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}")
-    if not photos:
-        await message.answer(
-            "⚠️ Спочатку надішли хоча б 1 зображення.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        return
+    category = data.get("category", "")
+    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
+
     await finish_submission(message.from_user, state, photos)
 
+    
 # ✅ Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
