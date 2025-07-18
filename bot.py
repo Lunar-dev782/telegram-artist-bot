@@ -280,6 +280,8 @@ async def process_question(message: Message, state: FSMContext):
     try:
         # Генерація унікального ID для питання
         question_id = str(uuid.uuid4())
+        logging.info(f"Створення питання з question_id={question_id}")
+
         # Збереження питання в Supabase
         question_data = {
             "question_id": question_id,
@@ -295,7 +297,7 @@ async def process_question(message: Message, state: FSMContext):
             if not result.data:
                 raise ValueError("Не вдалося зберегти питання в Supabase")
         except Exception as supabase_error:
-            logging.error(f"Помилка Supabase для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
+            logging.error(f"Помилка Supabase при збереженні питання для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
             await message.answer(
                 "⚠️ Помилка при збереженні питання в базі даних. Спробуйте ще раз або зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
@@ -349,6 +351,7 @@ async def process_question(message: Message, state: FSMContext):
                 parse_mode="HTML",
                 reply_markup=markup
             )
+            logging.info(f"Питання надіслано до адмінського чату для user_id={user_id}")
         except TelegramRetryAfter as e:
             logging.warning(f"Обмеження Telegram API, повтор через {e.retry_after} секунд для user_id={user_id}")
             await asyncio.sleep(e.retry_after)
@@ -388,8 +391,7 @@ async def process_question(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
     except Exception as e:
-        logging.error(f"Загальна помилка при обробці питання від user_id={user_id}: {str(e)}\n 
-        {traceback.format_exc()}")
+        logging.error(f"Загальна помилка при обробці питання від user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
             f"⚠️ Виникла помилка при надсиланні питання: {str(e)}. Спробуйте ще раз або зверніться до @AdminUsername.",
             reply_markup=ReplyKeyboardMarkup(
@@ -711,13 +713,13 @@ async def get_description_and_socials(message: Message, state: FSMContext):
     try:
         # Приймаємо текст як є
         description_text = message.text.strip()
-        # Розділяємо на нікнейм, опис і соцмережі (якщо можливо)
+        # Спробуємо розділити на нікнейм, опис і соцмережі, але зберігаємо весь текст
         lines = description_text.split('\n')
-        nickname = lines[0].strip() if lines else ""
+        nickname = lines[0].strip() if lines else description_text
         description = lines[1].strip() if len(lines) > 1 else description_text
         socials = '\n'.join(lines[2:]).strip() if len(lines) > 2 else ""
 
-        await state.update_data(nickname=nickname, description=description, socials=socials)
+        await state.update_data(nickname=nickname, description=description, socials=socials, raw_description=description_text)
         await message.answer(
             "📸 Хочете додати зображення до заявки? Оберіть варіант:",
             reply_markup=ReplyKeyboardMarkup(
@@ -739,12 +741,8 @@ async def get_description_and_socials(message: Message, state: FSMContext):
             )
         )
 
-@router.message(Form.images, F.text == "Надіслати без фото")
-async def submit_without_photos(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-    await finish_submission(message.from_user, state, photos=[])
-
+        
+# 🟢 Завершення надсилання зображень
 @router.message(Form.images, F.text == "/done")
 async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -754,6 +752,15 @@ async def done_images(message: Message, state: FSMContext):
 
     await finish_submission(message.from_user, state, photos)
 
+# 🟢 Надсилання без фото
+@router.message(Form.images, F.text == "Надіслати без фото")
+async def submit_without_photos(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+    await finish_submission(message.from_user, state, photos=[])
+
+    
+# 🟢 Обробка зображень
 @router.message(Form.images, F.photo)
 async def get_images(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -772,28 +779,30 @@ async def get_images(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+
     
 # ✅ Фінальна обробка заявки
+asyn# 🟢 Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
-    submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
-    logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
+    submission_id = str(uuid.uuid4())
+    logging.info(f"Фінальна обробка заявки від user_id={user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
 
     # Перевірка наявності даних
-    if not data.get("category") or not data.get("nickname") or not data.get("description") or not data.get("socials"):
-        logging.error(f"Неповні дані в стані для user_id={user.id}: {data}")
-        await bot.send_message(user.id, "⚠️ Помилка: неповні дані заявки. Будь ласка, заповніть анкету ще раз.")
+    if not data.get("category"):
+        logging.error(f"Відсутня категорія для user_id={user.id}: {data}")
+        await bot.send_message(user.id, "⚠️ Помилка: категорія не вказана. Заповніть анкету ще раз.")
         await state.clear()
         return
 
+    # Використовуємо raw_description, якщо є
+    description_text = data.get("raw_description", data.get("description", "Невказано"))
     text = (
         f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
         f"<b>Категорія:</b> {data['category']}\n"
         f"<b>Спосіб поширення:</b> {data.get('repost_platform', 'Невказано')}\n"
         f"<b>Посилання на допис:</b> {data.get('repost_link', 'Невказано')}\n"
-        f"<b>Нік:</b> {data.get('nickname', 'Невказано')}\n"
-        f"<b>Опис:</b> {data.get('description', 'Невказано')}\n"
-        f"<b>Соцмережі:</b>\n{data.get('socials', 'Невказано')}\n"
+        f"<b>Опис:</b>\n{description_text}\n"
         f"#public"
     )
 
@@ -833,7 +842,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         return
 
     try:
-        logging.info(f"Збереження заявки в Supabase для користувача {user.id}, submission_id={submission_id}")
+        logging.info(f"Збереження заявки в Supabase для user_id={user.id}, submission_id={submission_id}")
         submission_data = {
             "user_id": user.id,
             "username": user.username or user.first_name,
@@ -841,7 +850,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "repost_platform": data.get("repost_platform", ""),
             "repost_link": data.get("repost_link", ""),
             "nickname": data.get("nickname", ""),
-            "description": data.get("description", ""),
+            "description": description_text,
             "socials": data.get("socials", ""),
             "images": photos,
             "status": "pending",
@@ -867,6 +876,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await state.clear()
         return
 
+    
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: CallbackQuery):
