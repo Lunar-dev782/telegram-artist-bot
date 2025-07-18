@@ -782,7 +782,7 @@ async def get_images(message: Message, state: FSMContext):
 
     
 # ✅ Фінальна обробка заявки
-asyn# 🟢 Фінальна обробка заявки
+
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())
