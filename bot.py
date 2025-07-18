@@ -289,11 +289,13 @@ async def process_question(message: Message, state: FSMContext):
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat()
         }
-        result = supabase.table("questions").insert(question_data).execute()
-        logging.info(f"Питання збережено в Supabase: {result.data}")
-
-        if not result.data:
-            logging.error(f"Не вдалося зберегти питання в Supabase для user_id={user_id}, question_id={question_id}")
+        try:
+            result = supabase.table("questions").insert(question_data).execute()
+            logging.info(f"Питання збережено в Supabase: {result.data}")
+            if not result.data:
+                raise ValueError("Не вдалося зберегти питання в Supabase")
+        except Exception as supabase_error:
+            logging.error(f"Помилка Supabase для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
             await message.answer(
                 "⚠️ Помилка при збереженні питання в базі даних. Спробуйте ще раз або зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
@@ -319,7 +321,7 @@ async def process_question(message: Message, state: FSMContext):
             chat = await bot.get_chat(ADMIN_CHAT_ID)
             logging.info(f"Адмінський чат доступний: {chat.id}")
         except TelegramForbiddenError as e:
-            logging.error(f"Бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {e}")
+            logging.error(f"Бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
             await message.answer(
                 "⚠️ Бот не може надіслати питання до адмінів (немає доступу до чату). Зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
@@ -329,7 +331,7 @@ async def process_question(message: Message, state: FSMContext):
             )
             return
         except TelegramBadRequest as e:
-            logging.error(f"Помилка при перевірці адмінського чату {ADMIN_CHAT_ID}: {e}")
+            logging.error(f"Помилка при перевірці адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
             await message.answer(
                 "⚠️ Помилка при перевірці адмінського чату. Зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
@@ -356,6 +358,26 @@ async def process_question(message: Message, state: FSMContext):
                 parse_mode="HTML",
                 reply_markup=markup
             )
+        except TelegramForbiddenError as e:
+            logging.error(f"Помилка TelegramForbiddenError при надсиланні до адмінського чату: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(
+                "⚠️ Бот не може надіслати питання до адмінів (немає доступу). Зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+        except TelegramBadRequest as e:
+            logging.error(f"Помилка TelegramBadRequest при надсиланні до адмінського чату: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(
+                "⚠️ Помилка при надсиланні питання до адмінів. Зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
 
         await message.answer(
             "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
@@ -366,7 +388,8 @@ async def process_question(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
     except Exception as e:
-        logging.error(f"Помилка при обробці питання від user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Загальна помилка при обробці питання від user_id={user_id}: {str(e)}\n 
+        {traceback.format_exc()}")
         await message.answer(
             f"⚠️ Виникла помилка при надсиланні питання: {str(e)}. Спробуйте ще раз або зверніться до @AdminUsername.",
             reply_markup=ReplyKeyboardMarkup(
@@ -675,13 +698,9 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         await show_main_menu(message, state)
         return
 
-    if not message.text or len(message.text.split('\n')) < 3:
+    if not message.text:
         await message.answer(
-            "⚠️ Будь ласка, надішли всю інформацію одним повідомленням:\n"
-            "1. Ім’я / нікнейм\n"
-            "2. Короткий опис\n"
-            "3. Лінки на соцмережі\n\n"
-            "Спробуй ще раз.",
+            "⚠️ Будь ласка, надішли опис та соцмережі одним повідомленням.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -690,10 +709,13 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         return
 
     try:
-        lines = message.text.split('\n')
-        nickname = lines[0].strip()
-        description = lines[1].strip()
-        socials = '\n'.join(lines[2:]).strip()
+        # Приймаємо текст як є
+        description_text = message.text.strip()
+        # Розділяємо на нікнейм, опис і соцмережі (якщо можливо)
+        lines = description_text.split('\n')
+        nickname = lines[0].strip() if lines else ""
+        description = lines[1].strip() if len(lines) > 1 else description_text
+        socials = '\n'.join(lines[2:]).strip() if len(lines) > 2 else ""
 
         await state.update_data(nickname=nickname, description=description, socials=socials)
         await message.answer(
@@ -708,13 +730,9 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         )
         await state.set_state(Form.images)
     except Exception as e:
-        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {e}")
+        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Помилка формату повідомлення. Переконайся, що ти надіслав усі дані коректно:\n"
-            "1. Ім’я / нікнейм\n"
-            "2. Короткий опис\n"
-            "3. Лінки на соцмережі\n\n"
-            "Спробуй ще раз.",
+            "⚠️ Помилка обробки повідомлення. Спробуй ще раз.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -761,6 +779,13 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
     logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
 
+    # Перевірка наявності даних
+    if not data.get("category") or not data.get("nickname") or not data.get("description") or not data.get("socials"):
+        logging.error(f"Неповні дані в стані для user_id={user.id}: {data}")
+        await bot.send_message(user.id, "⚠️ Помилка: неповні дані заявки. Будь ласка, заповніть анкету ще раз.")
+        await state.clear()
+        return
+
     text = (
         f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
         f"<b>Категорія:</b> {data['category']}\n"
@@ -772,16 +797,12 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         f"#public"
     )
 
-    if photos:
-        media = [InputMediaPhoto(media=photos[0], caption=text, parse_mode="HTML")]
-        for p in photos[1:]:
-            media.append(InputMediaPhoto(media=p))
-    else:
-        media = None
-
     try:
         logging.info(f"Надсилання заявки в адмінський чат {ADMIN_CHAT_ID}")
-        if media:
+        if photos:
+            media = [InputMediaPhoto(media=photos[0], caption=text, parse_mode="HTML")]
+            for p in photos[1:]:
+                media.append(InputMediaPhoto(media=p))
             media_message = await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
             media_message_ids = [msg.message_id for msg in media_message]
         else:
@@ -796,18 +817,18 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
 
         await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
     except TelegramBadRequest as e:
-        logging.error(f"Помилка TelegramBadRequest при надсиланні в адмінський чат: {e}")
-        await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам (BadRequest). Зверніться до @AdminUsername.")
+        logging.error(f"Помилка TelegramBadRequest при надсиланні в адмінський чат: {str(e)}\n{traceback.format_exc()}")
+        await bot.send_message(user.id, "⚠️ Помилка при надсиланні заявки адмінам (BadRequest). Зверніться до @AdminUsername.")
         await state.clear()
         return
     except TelegramForbiddenError as e:
-        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {e}")
-        await bot.send_message(user.id, "⚠️ Виникла помилка: бот не може надіслати заявку адмінам (Forbidden). Зверніться до @AdminUsername.")
+        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
+        await bot.send_message(user.id, "⚠️ Помилка: бот не може надіслати заявку адмінам (Forbidden). Зверніться до @AdminUsername.")
         await state.clear()
         return
     except Exception as e:
-        logging.error(f"Невідома помилка при надсиланні в адмінський чат: {e}")
-        await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам. Зверніться до @AdminUsername.")
+        logging.error(f"Невідома помилка при надсиланні в адмінський чат: {str(e)}\n{traceback.format_exc()}")
+        await bot.send_message(user.id, "⚠️ Помилка при надсиланні заявки адмінам. Зверніться до @AdminUsername.")
         await state.clear()
         return
 
@@ -831,19 +852,9 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         result = supabase.table("submissions").insert(submission_data).execute()
         logging.info(f"Результат вставки в Supabase: {result.data}")
 
-        # Перевірка, чи заявка була успішно вставлена
         if not result.data:
             logging.error(f"Не вдалося вставити заявку в Supabase для user_id={user.id}, submission_id={submission_id}. Дані: {submission_data}")
-            await bot.send_message(user.id, "⚠️ Виникла помилка при збереженні заявки в базі даних. Зверніться до @AdminUsername.")
-            await state.clear()
-            return
-
-        # Додаткова перевірка збереженої заявки
-        check_insert = supabase.table("submissions").select("*").eq("user_id", user.id).eq("submission_id", submission_id).execute()
-        logging.info(f"Перевірка збереженої заявки: {check_insert.data}")
-        if not check_insert.data:
-            logging.error(f"Заявка для user_id={user.id}, submission_id={submission_id} не знайдена після вставки")
-            await bot.send_message(user.id, "⚠️ Заявка не була збережена в базі даних. Зверніться до @AdminUsername.")
+            await bot.send_message(user.id, "⚠️ Помилка при збереженні заявки в базі даних. Зверніться до @AdminUsername.")
             await state.clear()
             return
 
@@ -851,8 +862,8 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
         await state.clear()
     except Exception as e:
-        logging.error(f"Помилка при збереженні в Supabase: {e}")
-        await bot.send_message(user.id, f"⚠️ Виникла помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
+        logging.error(f"Помилка при збереженні в Supabase: {str(e)}\n{traceback.format_exc()}")
+        await bot.send_message(user.id, f"⚠️ Помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
         await state.clear()
         return
 
