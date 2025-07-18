@@ -45,6 +45,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s - %(me
 TOKEN = "7645134499:AAG5kuDHsUG-djs4qRjS7IX22UjzYKSXQHw"
 ADMIN_CHAT_ID = -1002802098163
 MAIN_CHAT_ID = -1002865535470
+ADMIN_CONTACTS = ["@Admin1", "@Admin2"]
 
 # 🤖 Ініціалізація бота
 bot = Bot(
@@ -66,22 +67,38 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # 📋 Стан машини
 class Form(StatesGroup):
-    category = State()
-    repost_platform = State()  # Стан для вибору платформи репосту
-    repost_link = State()      # Стан для отримання посилання на репост
-    description = State()
-    images = State()
+    main_menu = State()  # Головне меню після /start
+    category = State()   # Вибір категорії
+    repost_platform = State()  # Вибір платформи репосту
+    repost_link = State()      # Отримання посилання на репост
+    description = State()      # Введення опису та соцмереж
+    images = State()           # Завантаження зображень
+    question = State()         # Надсилання питання адмінам
+    answer = State()           # Введення відповіді адміном
 
 # 📋 Категорії та їх описи
 CATEGORIES = {
+    "💸 Платні послуги": "Коміші, прайси, реклама. Репост обов’язковий.",
+    "📣 Самопіар": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.",
+    "🎭 Активності": "Івенти, конкурси, лотереї, DTIYS (Draw This In Your Style).",
+    "🔍 Пошук критика / притика": "Шукаєш фідбек? Тобі сюди.",
+    "📩 Оголошення / звернення": "Обговорення, звернення — без зображень. Репост не обов’язковий.",
+    "➕ Інше": "Щось, що не вмістилось в інші категорії.",
     "🐾 Адопти": "Пости про персонажів, яких ви пропонуєте для адопції.",
-    "🧵 Реквести": "Запити на створення персонажів або іншого контенту.",
-    "🎨 Коміші / Прайси": "Оголошення про платні послуги (комішени, прайси).",
-    "🎁 Лотереї / Конкурси": "Оголошення про лотереї або конкурси.",
-    "📣 Самопіар": "Промоція вашого контенту чи профілю.",
-    "🤝 DTIYS": "Челенджі 'Draw This In Your Style'.",
-    "📅 Івенти": "Анонси подій, стрімів чи інших заходів."
+    "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
 }
+
+# 🟢 Фонова задача для видалення старих заявок
+async def cleanup_old_submissions():
+    while True:
+        try:
+            logging.info("Запуск задачі очищення старих заявок")
+            seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+            result = supabase.table("submissions").delete().lt("submitted_at", seven_days_ago).execute()
+            logging.info(f"Видалено {len(result.data)} заявок, старших за 7 днів")
+        except Exception as e:
+            logging.error(f"Помилка при очищенні старих заявок: {e}")
+        await asyncio.sleep(3600)  # Перевірка кожну годину
 
 # 🟢 Перевірка підписки на канал
 async def check_subscription(user_id: int) -> bool:
@@ -103,47 +120,13 @@ async def check_subscription(user_id: int) -> bool:
         logging.error(f"Невідома помилка при перевірці підписки для user_id={user_id}: {e}")
         return False
 
-# 🟢 /start
-@router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    await handle_start(message, state)
-
-@router.message(F.text.lower() == "start")
-async def cmd_pochnimo(message: Message, state: FSMContext):
-    await handle_start(message, state)
-
-@router.message(F.text == "Я підписався(лась)")
-async def check_subscription_again(message: Message, state: FSMContext):
+# 🟢 Головне меню
+async def show_main_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} повторно перевіряє підписку")
-    if not await check_subscription(user_id):
-        await message.answer(
-            "⚠️ Ви все ще не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
-            "[Перейти до каналу](https://t.me/+bTmE3LOAMFI5YzBi) і натисніть 'Я підписався(лась)'.",
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
-                resize_keyboard=True
-            )
-        )
-        return
-
-    await message.answer(
-        "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
-        "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.category)
-
-async def handle_start(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"start команда від користувача {user_id}")
+    logging.info(f"Показ головного меню для користувача {user_id}")
 
     try:
-        # Перевірка підписки на канал
+        # Перевірка підписки
         subscription_status = await check_subscription(user_id)
         logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
         if not subscription_status:
@@ -159,53 +142,336 @@ async def handle_start(message: Message, state: FSMContext):
             return
 
         await message.answer(
-            "🎨 Привіт! Це бот для публікацій у спільноті [Назва].\n"
-            "Обери розділ, у якому хочеш зробити пост, та дотримуйся простих умов, щоб бути опублікованим 💫",
+            "🎨 Вітаємо в боті спільноти *Митці ЮА*! Оберіть дію:",
+            parse_mode="Markdown",
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()],
+                keyboard=[
+                    [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                    [KeyboardButton(text="❓ Інші питання")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.main_menu)
+    except Exception as e:
+        logging.error(f"Помилка в show_main_menu для user_id={user_id}: {e}")
+        await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
+
+# 🟢 Запуск фонової задачі очищення
+async def on_startup():
+    asyncio.create_task(cleanup_old_submissions())
+
+# 🟢 /start
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+@router.message(F.text.lower() == "start")
+async def cmd_pochnimo(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+@router.message(F.text == "Я підписався(лась)")
+async def check_subscription_again(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+# 🟢 Обробка головного меню
+@router.message(Form.main_menu, F.text == "📜 Правила")
+@router.message(Command("rules"))
+async def cmd_rules(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Команда або кнопка /правила від користувача {user_id}")
+    rules_text = (
+        "📖 Ознайомся з основними правилами спільноти *Митці ЮА*:\n\n"
+        "📜 Правила публікацій:\n"
+        "1. Дотримуйтесь умов для обраної категорії.\n"
+        "2. Надсилайте лише оригінальний контент.\n"
+        "3. Не більше 5 зображень на пост.\n"
+        "4. Публікації дозволені не частіше, ніж 2 пости на 7 днів.\n"
+        "5. Зробіть репост нашої спільноти в соцмережі або надішліть друзям.\n"
+        "6. Заборонено NSFW, образливий або незаконний контент.\n"
+        "7. Адміни мають право відхилити заявку з поясненням.\n\n"
+        "📩 З питаннями: @AdminUsername\n"
+        "👉 [Докладні правила](https://telegra.ph/Pravyla-Mytci-UA)"
+    )
+    await message.answer(
+        rules_text,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+
+# 🟢 Обробка "Запропонувати пост"
+@router.message(Form.main_menu, F.text == "📝 Запропонувати пост")
+async def handle_propose_post(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Запропонувати пост'")
+
+    try:
+        # Перевірка частоти подачі заявок (до 2 постів за 7 днів)
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        recent_submissions = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).gte("submitted_at", seven_days_ago).execute()
+        if len(recent_submissions.data) >= 2:
+            await message.answer(
+                "⚠️ Ви можете подавати не більше 2 заявок на 7 днів. Спробуйте пізніше!",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        await message.answer(
+            "🎨 Обери категорію для публікації:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()] + [[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
             )
         )
         await state.set_state(Form.category)
     except Exception as e:
-        logging.error(f"Помилка в handle_start для user_id={user_id}: {e}")
-        await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
+        logging.error(f"Помилка в handle_propose_post для user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+# 🟢 Обробка "Інші питання"
+@router.message(Form.main_menu, F.text == "❓ Інші питання")
+async def handle_other_questions(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Інші питання'")
+    await message.answer(
+        f"❓ Якщо у вас є питання — напишіть його тут, і наші адміни дадуть відповідь протягом доби.\n\n"
+        f"📩 Також можете звернутись напряму:\n{' • '.join(ADMIN_CONTACTS)}",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        ),
+        parse_mode="Markdown"
+    )
+    await state.set_state(Form.question)
+
+# 🟢 Обробка питань до адмінів
+@router.message(Form.question)
+async def process_question(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    question = message.text.strip()
+    logging.info(f"Користувач {user_id} надіслав питання: {question}")
+
+    if question == "⬅️ Назад":
+        await show_main_menu(message, state)
+        return
+
+    if not question:
+        await message.answer(
+            "⚠️ Будь ласка, напишіть ваше питання.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        # Генерація унікального ID для питання
+        question_id = str(uuid.uuid4())
+        # Збереження питання в Supabase
+        question_data = {
+            "question_id": question_id,
+            "user_id": user_id,
+            "username": message.from_user.username or message.from_user.first_name,
+            "question_text": question,
+            "status": "pending",
+            "submitted_at": datetime.utcnow().isoformat()
+        }
+        result = supabase.table("questions").insert(question_data).execute()
+        logging.info(f"Питання збережено в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося зберегти питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer(
+                "⚠️ Виникла помилка при збереженні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+
+        # Формування повідомлення з клікабельним ім’ям
+        username = message.from_user.username or message.from_user.first_name
+        user_link = f'<a href="tg://user?id={user_id}">{username}</a>'
+        question_message = (
+            f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
+            f"{question}"
+        )
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
+        markup = keyboard.as_markup()
+
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=question_message,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+        await message.answer(
+            "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.main_menu)
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні питання до адмінів від user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка при надсиланні питання. Спробуйте ще раз або зверніться до @AdminUsername.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+# 🟢 Обробка натискання кнопки "Відповісти"
+@router.callback_query(lambda c: c.data.startswith("answer:"))
+async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    question_id = parts[2]
+    logging.info(f"Адмін {callback.from_user.id} натиснув 'Відповісти' для user_id={user_id}, question_id={question_id}")
+
+    try:
+        # Перевірка існування питання
+        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
+        if not question.data or question.data[0]["status"] != "pending":
+            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
+            await callback.answer()
+            return
+
+        await callback.message.answer(
+            f"✉️ Напишіть відповідь для користувача (ID: {user_id}):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        await state.update_data(user_id=user_id, question_id=question_id)
+        await state.set_state(Form.answer)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {e}")
+        await callback.message.edit_text("⚠️ Помилка при обробці питання. Зверніться до розробника.")
+        await callback.answer()
+
+# 🟢 Обробка відповіді адміна
+@router.message(Form.answer)
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
+    logging.info(f"Адмін {admin_id} надіслав відповідь для user_id={user_id}, question_id={question_id}: {answer_text}")
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer(
+            "✅ Обробку відповіді скасовано.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+        return
+
+    if not answer_text:
+        await message.answer(
+            "⚠️ Будь ласка, напишіть текст відповіді.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        # Надсилання відповіді користувачу
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ Відповідь від адміна: {answer_text}"
+        )
+        # Оновлення статусу питання в Supabase
+        result = supabase.table("questions").update({
+            "status": "answered",
+            "answered_at": datetime.utcnow().isoformat(),
+            "admin_id": admin_id,
+            "answer_text": answer_text
+        }).eq("question_id", question_id).eq("user_id", user_id).execute()
+        logging.info(f"Оновлення статусу питання в Supabase: {result.data}")
+
+        if not result.data:
+            logging.error(f"Не вдалося оновити питання в Supabase для user_id={user_id}, question_id={question_id}")
+            await message.answer("⚠️ Помилка при збереженні відповіді. Спробуйте ще раз.")
+            return
+
+        # Оновлення повідомлення в адмінському чаті
+        await bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}"
+        )
+        await message.answer(
+            "✅ Відповідь успішно надіслано користувачу!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except TelegramForbiddenError as e:
+        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+    except Exception as e:
+        logging.error(f"Помилка при надсиланні відповіді для user_id={user_id}: {e}")
+        await message.answer(
+            "⚠️ Виникла помилка при надсиланні відповіді. Спробуйте ще раз або зверніться до розробника.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+
+# 🟢 Обробка повернення до головного меню
+@router.message(F.text == "⬅️ Назад")
+async def handle_back(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
 
 # 🟢 /help
 @router.message(Command("help"))
-async def cmd_help(message: Message):
+async def cmd_help(message: Message, state: FSMContext):
     logging.info(f"Команда /допомога від користувача {message.from_user.id}")
     help_text = (
-        "ℹ️ Це бот для подачі заявок на публікацію у спільноті [Назва].\n\n"
+        "ℹ️ Це бот для подачі заявок на публікацію у спільноті *Митці ЮА*.\n\n"
         "Як це працює:\n"
-        "1️⃣ Обери категорію через команду /почнімо.\n"
-        "2️⃣ Виконай умови (репост або надсилання друзям, підписка, заповнення анкети).\n"
-        "3️⃣ Надішли дані одним повідомленням (нік, опис, соцмережі, зображення).\n"
+        "1️⃣ Обери дію в головному меню після /start.\n"
+        "2️⃣ Для публікації: вибери категорію, виконай умови (репост або надсилання друзям, підписка, заповнення анкети).\n"
+        "3️⃣ Надішли дані одним повідомленням (нік, опис, соцмережі, зображення — якщо потрібно).\n"
         "4️⃣ Чекай на перевірку адміном.\n\n"
         "📜 Правила: /rules\n"
-        "📩 Якщо є питання, пиши адмінам: @AdminUsername"
+        f"📩 З питаннями: {' • '.join(ADMIN_CONTACTS)}"
     )
-    await message.answer(help_text)
-
-# 🟢 /rules
-@router.message(Command("rules"))
-async def cmd_rules(message: Message):
-    logging.info(f"Команда /правила від користувача {message.from_user.id}")
-    rules_text = (
-        "📜 Правила публікацій:\n"
-        "1. Дотримуйтесь умов для обраної категорії.\n"
-        "2. Надсилайте лише оригінальний контент.\n"
-        "3. Не більше 5 зображень на пост.\n"
-        "4. Публікації дозволені не частіше, ніж раз на 7 днів.\n"
-        "5. Зробіть репост нашої спільноти в соцмережі або надішліть друзям.\n"
-        "6. Заборонено NSFW, образливий або незаконний контент.\n"
-        "7. Адміни мають право відхилити заявку з поясненням.\n\n"
-        "📩 З питаннями: @AdminUsername"
+    await message.answer(
+        help_text,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
     )
-    await message.answer(rules_text)
 
 # 🟢 Обробка вибору категорії
-@router.message(lambda message: message.text in CATEGORIES)
+@router.message(Form.category, lambda message: message.text in CATEGORIES)
 async def handle_category_selection(message: Message, state: FSMContext):
     user_id = message.from_user.id
     category = message.text
@@ -226,29 +492,37 @@ async def handle_category_selection(message: Message, state: FSMContext):
         )
         return
 
-    # Перевірка частоти подачі заявок
-    try:
-        last_submission = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).order("submitted_at", desc=True).limit(1).execute()
-        if last_submission.data:
-            last_time = datetime.fromisoformat(last_submission.data[0]["submitted_at"].replace("Z", "+00:00"))
-            if datetime.utcnow() - last_time < timedelta(days=7):
-                await message.answer("⚠️ Ви можете подавати заявку не частіше, ніж раз на 7 днів. Спробуйте пізніше!")
-                return
-    except Exception as e:
-        logging.error(f"Помилка при перевірці останньої заявки в Supabase: {e}")
-        await message.answer("⚠️ Виникла помилка при перевірці вашої заявки. Зверніться до @AdminUsername.")
+    await state.update_data(category=category)
+    # Якщо категорія "Оголошення / звернення", репост не обов’язковий
+    if category == "📩 Оголошення / звернення":
+        await message.answer(
+            f"✅ Ви обрали категорію {category}: {CATEGORIES[category]}\n\n"
+            f"📝 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+            f"1. Короткий опис\n"
+            f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
+            f"📌 Приклад:\n"
+            f"Нік: @Artist\n"
+            f"Опис: Шукаю партнерів для колаборації!\n"
+            f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            ),
+            parse_mode="Markdown"
+        )
+        await state.update_data(repost_platform="", repost_link="")  # Репост не потрібен
+        await state.set_state(Form.description)
         return
 
-    await state.update_data(category=category)
     await message.answer(
-        f"✅ Щоб опублікувати в розділі {category}, виконай наступні кроки:\n\n"
+        f"✅ Ви обрали категорію {category}: {CATEGORIES[category]}\n\n"
         f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) у соцмережі або надішли друзям\n"
-        f"📝 Заповни анкету\n\n"
-        f"📌 Приклад: {CATEGORIES[category]}\n\n"
+        f"📝 Потім заповни анкету\n\n"
         f"Де ти поділився(лась) інформацією?",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")]
+                [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
+                [KeyboardButton(text="⬅️ Назад")]
             ],
             resize_keyboard=True
         ),
@@ -266,6 +540,13 @@ async def process_repost_platform(message: Message, state: FSMContext):
     if platform not in ["Соцмережа", "Надіслано друзям"]:
         await message.answer(
             "⚠️ Будь ласка, вибери один із запропонованих варіантів: 'Соцмережа' або 'Надіслано друзям'.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
+                    [KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
+            ),
             parse_mode="Markdown"
         )
         return
@@ -274,23 +555,30 @@ async def process_repost_platform(message: Message, state: FSMContext):
     if platform == "Соцмережа":
         await message.answer(
             f"🔗 Будь ласка, надішли посилання на твій допис у соцмережі.",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            ),
+            parse_mode="Markdown"
         )
         await state.set_state(Form.repost_link)
     else:  # Надіслано друзям
         await message.answer(
             "✅ Дякуємо! Адмін скоро зв’яжеться з вами для перевірки доказів. Очікуйте!",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            ),
             parse_mode="Markdown"
         )
         await message.answer(
-            "📝 Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-            "1. Короткий опис\n"
-            "2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
-            "📌 Приклад:\n"
-            "Нік: @Artist\n"
-            "Опис: Продаю персонажа, унікальний дизайн!\n"
-            "Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+            f"📝 Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+            f"1. Короткий опис\n"
+            f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
+            f"📌 Приклад:\n"
+            f"Нік: @Artist\n"
+            f"Опис: Продаю персонажа, унікальний дизайн!\n"
+            f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
             parse_mode="Markdown"
         )
         await state.update_data(repost_link="")  # Зберігаємо порожнє посилання
@@ -303,6 +591,10 @@ async def process_repost_link(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} надіслав посилання на допис: {repost_link}")
 
+    if repost_link == "⬅️ Назад":
+        await show_main_menu(message, state)
+        return
+
     # Базова перевірка формату URL
     url_pattern = re.compile(
         r'^(https?://)?'  # Протокол (http:// або https://)
@@ -312,20 +604,26 @@ async def process_repost_link(message: Message, state: FSMContext):
     if not url_pattern.match(repost_link):
         await message.answer(
             "⚠️ Посилання виглядає некоректним. Будь ласка, надішли правильне посилання на допис (наприклад, https://www.instagram.com/..., https://t.me/...).",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
         )
         return
 
     await state.update_data(repost_link=repost_link)
     await message.answer(
-        "✅ Дякуємо за репост! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-        "1. Короткий опис\n"
-        "2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
-        "📌 Приклад:\n"
-        "Нік: @Artist\n"
-        "Опис: Продаю персонажа, унікальний дизайн!\n"
-        "Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
-        reply_markup=ReplyKeyboardRemove(),
+        f"✅ Дякуємо за репост! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+        f"1. Короткий опис\n"
+        f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
+        f"📌 Приклад:\n"
+        f"Нік: @Artist\n"
+        f"Опис: Продаю персонажа, унікальний дизайн!\n"
+        f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        ),
         parse_mode="Markdown"
     )
     await state.set_state(Form.description)
@@ -333,14 +631,24 @@ async def process_repost_link(message: Message, state: FSMContext):
 # 🟢 Опис та соцмережі одним повідомленням
 @router.message(Form.description)
 async def get_description_and_socials(message: Message, state: FSMContext):
-    logging.info(f"Користувач {message.from_user.id} надіслав анкету: {message.text}")
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав анкету: {message.text}")
+
+    if message.text == "⬅️ Назад":
+        await show_main_menu(message, state)
+        return
+
     if not message.text or len(message.text.split('\n')) < 3:
         await message.answer(
             "⚠️ Будь ласка, надішли всю інформацію одним повідомленням:\n"
             "1. Ім’я / нікнейм\n"
             "2. Короткий опис\n"
             "3. Лінки на соцмережі\n\n"
-            "Спробуй ще раз."
+            "Спробуй ще раз.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
         )
         return
 
@@ -351,17 +659,60 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         socials = '\n'.join(lines[2:]).strip()
 
         await state.update_data(nickname=nickname, description=description, socials=socials)
-        await message.answer("📸 Надішли до 5 зображень для публікації")
-        await state.set_state(Form.images)
+        data = await state.get_data()
+        category = data.get("category", "")
+
+        if category == "📩 Оголошення / звернення":
+            await message.answer(
+                "📸 Хочете додати зображення до заявки? Оберіть варіант:",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="Надіслати без фото"), KeyboardButton(text="Додати фото")],
+                        [KeyboardButton(text="⬅️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+            )
+        else:
+            await message.answer(
+                "📸 Надішли до 5 зображень для публікації",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            await state.set_state(Form.images)
     except Exception as e:
-        logging.error(f"Помилка обробки повідомлення: {e}")
+        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {e}")
         await message.answer(
             "⚠️ Помилка формату повідомлення. Переконайся, що ти надіслав усі дані коректно:\n"
             "1. Ім’я / нікнейм\n"
             "2. Короткий опис\n"
             "3. Лінки на соцмережі\n\n"
-            "Спробуй ще раз."
+            "Спробуй ще раз.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
         )
+
+# 🟢 Обробка вибору для "Оголошення / звернення"
+@router.message(Form.description, F.text == "Надіслати без фото")
+async def submit_without_photos(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+    await finish_submission(message.from_user, state, photos=[])
+
+@router.message(Form.description, F.text == "Додати фото")
+async def add_photos(message: Message, state: FSMContext):
+    await message.answer(
+        "📸 Надішли до 5 зображень для публікації",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.images)
 
 # 🟢 Фото
 @router.message(Form.images, F.photo)
@@ -372,11 +723,16 @@ async def get_images(message: Message, state: FSMContext):
     logging.info(f"Користувач {message.from_user.id} надіслав зображення: {message.photo[-1].file_id}")
 
     if len(photos) >= 5:
-        await message.answer("✅ Дякую! Надіслано на перевірку.")
         await finish_submission(message.from_user, state, photos)
     else:
         await state.update_data(photos=photos)
-        await message.answer(f"Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.")
+        await message.answer(
+            f"Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
 
 # ✅ /done
 @router.message(Form.images, F.text == "/done")
@@ -385,19 +741,24 @@ async def done_images(message: Message, state: FSMContext):
     photos = data.get("photos", [])
     logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}")
     if not photos:
-        await message.answer("⚠️ Спочатку надішли хоча б 1 зображення.")
+        await message.answer(
+            "⚠️ Спочатку надішли хоча б 1 зображення.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
         return
-    await message.answer("✅ Дякую! Надіслано на перевірку.")
     await finish_submission(message.from_user, state, photos)
 
-# ✅ Фінальна обробка
+# ✅ Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())  # Унікальний ідентифікатор заявки
     logging.info(f"Фінальна обробка заявки від користувача {user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
 
     text = (
-        f"📥 <b>Нова заявка від</b> @{user.username or user.first_name}\n"
+        f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
         f"<b>Категорія:</b> {data['category']}\n"
         f"<b>Спосіб поширення:</b> {data.get('repost_platform', 'Невказано')}\n"
         f"<b>Посилання на допис:</b> {data.get('repost_link', 'Невказано')}\n"
@@ -407,21 +768,29 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         f"#public"
     )
 
-    media = [InputMediaPhoto(media=photos[0], caption=text, parse_mode="HTML")]
-    for p in photos[1:]:
-        media.append(InputMediaPhoto(media=p))
-
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}:{submission_id}")
-    keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}:{submission_id}")
-    markup = keyboard.as_markup()
+    if photos:
+        media = [InputMediaPhoto(media=photos[0], caption=text, parse_mode="HTML")]
+        for p in photos[1:]:
+            media.append(InputMediaPhoto(media=p))
+    else:
+        media = None
 
     try:
-        logging.info(f"Надсилання медіа-групи в адмінський чат {ADMIN_CHAT_ID}")
-        media_message = await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
-        logging.info(f"Надсилання повідомлення з кнопками в адмінський чат {ADMIN_CHAT_ID}")
+        logging.info(f"Надсилання заявки в адмінський чат {ADMIN_CHAT_ID}")
+        if media:
+            media_message = await bot.send_media_group(chat_id=ADMIN_CHAT_ID, media=media)
+            media_message_ids = [msg.message_id for msg in media_message]
+        else:
+            media_message_ids = []
+            media_message = await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode="HTML")
+            media_message_ids.append(media_message.message_id)
+
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}:{submission_id}")
+        keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}:{submission_id}")
+        markup = keyboard.as_markup()
+
         await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 Оберіть дію:", reply_markup=markup)
-        media_message_ids = [msg.message_id for msg in media_message]
     except TelegramBadRequest as e:
         logging.error(f"Помилка TelegramBadRequest при надсиланні в адмінський чат: {e}")
         await bot.send_message(user.id, "⚠️ Виникла помилка при надсиланні заявки адмінам (BadRequest). Зверніться до @AdminUsername.")
@@ -502,12 +871,18 @@ async def approve_post(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # Оновлення статусу заявки
+        # Оновлення статусу заявки та очищення даних
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
             "status": "approved",
             "moderated_at": datetime.utcnow().isoformat(),
-            "moderator_id": callback.from_user.id
+            "moderator_id": callback.from_user.id,
+            "description": None,
+            "socials": None,
+            "images": None,
+            "repost_platform": None,
+            "repost_link": None,
+            "nickname": None
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
 
@@ -534,17 +909,19 @@ async def approve_post(callback: CallbackQuery):
         data = submission.data[0]
         post_text = (
             f"📢 <b>{data['category']}</b>\n\n"
-            f"{data['description']}\n\n"
-            f"🌐 <b>Соцмережі:</b>\n{data['socials']}\n"
-            f"👤 Від: @{data['username']}\n"
+            f"{data['description'] or 'Опис відсутній'}\n\n"
+            f"🌐 <b>Соцмережі:</b>\n{data['socials'] or 'Невказано'}\n"
+            f"👤 Від: <a href=\"tg://user?id={user_id}\">{data['username']}</a>\n"
             f"#public"
         )
-        media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
-        for photo in data["images"][1:]:
-            media.append(InputMediaPhoto(media=photo))
 
-        logging.info(f"Відправка медіа-групи в основний чат {MAIN_CHAT_ID}")
-        await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+        if data["images"]:
+            media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
+            for photo in data["images"][1:]:
+                media.append(InputMediaPhoto(media=photo))
+            await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+        else:
+            await bot.send_message(chat_id=MAIN_CHAT_ID, text=post_text, parse_mode="HTML")
 
         await callback.message.edit_text("✅ Публікацію схвалено та опубліковано в основному чаті!")
         await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
@@ -577,7 +954,13 @@ async def reject_post(callback: CallbackQuery):
             "status": "rejected",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id,
-            "rejection_reason": "Невідповідність вимогам"
+            "rejection_reason": "Невідповідність вимогам",
+            "description": None,
+            "socials": None,
+            "images": None,
+            "repost_platform": None,
+            "repost_link": None,
+            "nickname": None
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
@@ -602,7 +985,16 @@ async def error_handler(update, exception):
         if update and hasattr(update, 'callback_query'):
             await update.callback_query.answer("⚠️ Виникла помилка. Спробуйте ще раз.")
         elif update and hasattr(update, 'message'):
-            await update.message.answer("⚠️ Виникла помилка при обробці вашого запиту. Спробуйте ще раз або зверніться до @AdminUsername.")
+            await update.message.answer(
+                "⚠️ Виникла помилка при обробці вашого запиту. Спробуйте ще раз або зверніться до @AdminUsername.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
     except Exception as e:
         logging.error(f"Помилка при надсиланні повідомлення про помилку: {e}")
     return True
+
+# Запуск фонової задачі при старті
+dp.startup.register(on_startup)
