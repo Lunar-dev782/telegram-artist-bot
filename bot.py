@@ -721,15 +721,21 @@ async def get_description_and_socials(message: Message, state: FSMContext):
             )
         )
 
+@router.message(Form.images, F.text == "Надіслати без фото")
+async def submit_without_photos(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+    await finish_submission(message.from_user, state, photos=[])
+
 @router.message(Form.images, F.text == "/done")
 async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
     category = data.get("category", "")
-    logging.info(f"Кори
+    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
 
+    await finish_submission(message.from_user, state, photos)
 
-# 🟢 Фото
 @router.message(Form.images, F.photo)
 async def get_images(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -748,17 +754,6 @@ async def get_images(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
-
-# ✅ /done
-@router.message(Form.images, F.text == "/done")
-async def done_images(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    category = data.get("category", "")
-    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
-
-    await finish_submission(message.from_user, state, photos)
-
     
 # ✅ Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
