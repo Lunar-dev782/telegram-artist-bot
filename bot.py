@@ -54,10 +54,7 @@ bot = Bot(
 storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 router = Router()
-dp.include_router(router)  # Підключаємо маршрутизатор один раз
-
-# Експортуємо dp і bot для використання в webhook.py
-__all__ = ["dp", "bot", "TOKEN"]
+dp.include_router(router)
 
 # 🔌 Дані для Supabase
 SUPABASE_URL = "https://clbcovdeoahrmxaoijyt.supabase.co"
@@ -66,25 +63,25 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # 📋 Стан машини
 class Form(StatesGroup):
-    main_menu = State()  # Головне меню після /start
-    category = State()   # Вибір категорії
-    repost_platform = State()  # Вибір платформи репосту
-    repost_link = State()      # Отримання посилання на репост
-    description = State()      # Введення опису та соцмереж
-    images = State()           # Завантаження зображень
-    question = State()         # Надсилання питання адмінам
-    answer = State()           # Введення відповіді адміном
+    main_menu = State()
+    category = State()
+    repost_platform = State()
+    repost_link = State()
+    description = State()
+    images = State()
+    question = State()
+    answer = State()
 
-# 📋 Категорії та їх описи
+# 📋 Категорії та їх хештеги
 CATEGORIES = {
-    "💸 Платні послуги": "Коміші, прайси, реклама. Репост обов’язковий.",
-    "📣 Самопіар": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.",
-    "🎭 Активності": "Івенти, конкурси, лотереї, DTIYS (Draw This In Your Style).",
-    "🔍 Пошук критика / притика": "Шукаєш фідбек? Тобі сюди.",
-    "📩 Оголошення / звернення": "Обговорення, звернення — без зображень. Репост не обов’язковий.",
-    "➕ Інше": "Щось, що не вмістилось в інші категорії.",
-    "🐾 Адопти": "Пости про персонажів, яких ви пропонуєте для адопції.",
-    "🧵 Реквести": "Запити на створення персонажів або іншого контенту."
+    "💸 Платні послуги": {"description": "Коміші, прайси, реклама. Репост обов’язковий.", "hashtag": "#Платні_послуги"},
+    "📣 Самопіар": {"description": "Промоція вашого контенту, блогу або профілю. Репост обов’язковий.", "hashtag": "#Самопіар"},
+    "🎭 Активності": {"description": "Івенти, конкурси, лотереї, DTIYS.", "hashtag": "#Активності"},
+    "🔍 Пошук критика / притика": {"description": "Шукаєш фідбек? Тобі сюди.", "hashtag": "#Пошук_критика"},
+    "📩 Оголошення / звернення": {"description": "Обговорення, звернення — без зображень. Репост не обов’язковий.", "hashtag": "#Оголошення_звернення"},
+    "➕ Інше": {"description": "Щось, що не вмістилось в інші категорії.", "hashtag": "#Інше"},
+    "🐾 Адопти": {"description": "Пости про персонажів, яких ви пропонуєте для адопції.", "hashtag": "#Адопти"},
+    "🧵 Реквести": {"description": "Запити на створення персонажів або іншого контенту.", "hashtag": "#Реквести"}
 }
 
 # 🟢 Фонова задача для видалення старих заявок
@@ -97,7 +94,7 @@ async def cleanup_old_submissions():
             logging.info(f"Видалено {len(result.data)} заявок, старших за 7 днів")
         except Exception as e:
             logging.error(f"Помилка при очищенні старих заявок: {e}")
-        await asyncio.sleep(3600)  # Перевірка кожну годину
+        await asyncio.sleep(3600)
 
 # 🟢 Перевірка підписки на канал
 async def check_subscription(user_id: int) -> bool:
@@ -125,7 +122,6 @@ async def show_main_menu(message: Message, state: FSMContext):
     logging.info(f"Показ головного меню для користувача {user_id}")
 
     try:
-        # Перевірка підписки
         subscription_status = await check_subscription(user_id)
         logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
         if not subscription_status:
@@ -208,7 +204,6 @@ async def handle_propose_post(message: Message, state: FSMContext):
     logging.info(f"Користувач {user_id} обрав 'Запропонувати пост'")
 
     try:
-        # Перевірка частоти подачі заявок (до 2 постів за 7 днів)
         seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
         recent_submissions = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).gte("submitted_at", seven_days_ago).execute()
         if len(recent_submissions.data) >= 2:
@@ -277,15 +272,17 @@ async def process_question(message: Message, state: FSMContext):
         return
 
     try:
-        # Генерація унікального ID для питання
         question_id = str(uuid.uuid4())
         logging.info(f"Створення питання з question_id={question_id}")
 
-        # Збереження питання в Supabase
+        # Формування імені користувача
+        user_display_name = message.from_user.full_name if not message.from_user.username else message.from_user.full_name
+        user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
+
         question_data = {
             "question_id": question_id,
             "user_id": user_id,
-            "username": message.from_user.username or message.from_user.first_name,
+            "username": user_display_name,
             "question_text": question,
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat()
@@ -307,9 +304,6 @@ async def process_question(message: Message, state: FSMContext):
             )
             return
 
-        # Формування повідомлення з клікабельним ім’ям
-        username = message.from_user.username or message.from_user.first_name
-        user_link = f'<a href="tg://user?id={user_id}">{username}</a>'
         question_message = (
             f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
             f"{question}"
@@ -318,32 +312,6 @@ async def process_question(message: Message, state: FSMContext):
         keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
         markup = keyboard.as_markup()
 
-        # Перевірка доступу до адмінського чату
-        try:
-            chat = await bot.get_chat(ADMIN_CHAT_ID)
-            logging.info(f"Адмінський чат доступний: {chat.id}")
-        except TelegramForbiddenError as e:
-            logging.error(f"Бот не має доступу до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Бот не може надіслати питання до адмінів (немає доступу до чату). Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
-        except TelegramBadRequest as e:
-            logging.error(f"Помилка при перевірці адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Помилка при перевірці адмінського чату. Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
-
-        # Спроба надсилання повідомлення до адмінів
         try:
             await bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
@@ -409,7 +377,6 @@ async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
     logging.info(f"Адмін {callback.from_user.id} натиснув 'Відповісти' для user_id={user_id}, question_id={question_id}")
 
     try:
-        # Перевірка існування питання
         question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
         if not question.data or question.data[0]["status"] != "pending":
             await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
@@ -460,12 +427,10 @@ async def process_answer(message: Message, state: FSMContext):
         return
 
     try:
-        # Надсилання відповіді користувачу
         await bot.send_message(
             chat_id=user_id,
             text=f"✉️ Відповідь від адміна: {answer_text}"
         )
-        # Оновлення статусу питання в Supabase
         result = supabase.table("questions").update({
             "status": "answered",
             "answered_at": datetime.utcnow().isoformat(),
@@ -479,7 +444,6 @@ async def process_answer(message: Message, state: FSMContext):
             await message.answer("⚠️ Помилка при збереженні відповіді. Спробуйте ще раз.")
             return
 
-        # Оновлення повідомлення в адмінському чаті
         await bot.send_message(
             chat_id=ADMIN_CHAT_ID,
             text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}"
@@ -539,7 +503,6 @@ async def handle_category_selection(message: Message, state: FSMContext):
     category = message.text
     logging.info(f"Користувач {user_id} обрав категорію: {category}")
 
-    # Перевірка підписки на канал
     subscription_status = await check_subscription(user_id)
     logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
     if not subscription_status:
@@ -555,10 +518,9 @@ async def handle_category_selection(message: Message, state: FSMContext):
         return
 
     await state.update_data(category=category)
-    # Якщо категорія "Оголошення / звернення", репост не обов’язковий
     if category == "📩 Оголошення / звернення":
         await message.answer(
-            f"✅ Ви обрали категорію {category}: {CATEGORIES[category]}\n\n"
+            f"✅ Ви обрали категорію {category}: {CATEGORIES[category]['description']}\n\n"
             f"📝 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
             f"1. Короткий опис\n"
             f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
@@ -572,12 +534,12 @@ async def handle_category_selection(message: Message, state: FSMContext):
             ),
             parse_mode="Markdown"
         )
-        await state.update_data(repost_platform="", repost_link="")  # Репост не потрібен
+        await state.update_data(repost_platform="", repost_link="")
         await state.set_state(Form.description)
         return
 
     await message.answer(
-        f"✅ Ви обрали категорію {category}: {CATEGORIES[category]}\n\n"
+        f"✅ Ви обрали категорію {category}: {CATEGORIES[category]['description']}\n\n"
         f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) у соцмережі або надішли друзям\n"
         f"📝 Потім заповни анкету\n\n"
         f"Де ти поділився(лась) інформацією?",
@@ -624,7 +586,7 @@ async def process_repost_platform(message: Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(Form.repost_link)
-    else:  # Надіслано друзям
+    else:
         await message.answer(
             "✅ Дякуємо! Адмін скоро зв’яжеться з вами для перевірки доказів. Очікуйте!",
             reply_markup=ReplyKeyboardMarkup(
@@ -643,7 +605,7 @@ async def process_repost_platform(message: Message, state: FSMContext):
             f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
             parse_mode="Markdown"
         )
-        await state.update_data(repost_link="")  # Зберігаємо порожнє посилання
+        await state.update_data(repost_link="")
         await state.set_state(Form.description)
 
 # 🟢 Обробка посилання на репост
@@ -657,11 +619,10 @@ async def process_repost_link(message: Message, state: FSMContext):
         await show_main_menu(message, state)
         return
 
-    # Базова перевірка формату URL
     url_pattern = re.compile(
-        r'^(https?://)?'  # Протокол (http:// або https://)
-        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'  # Домен
-        r'(/.*)?$'  # Шлях (опціонально)
+        r'^(https?://)?'
+        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'
+        r'(/.*)?$'
     )
     if not url_pattern.match(repost_link):
         await message.answer(
@@ -711,9 +672,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         return
 
     try:
-        # Приймаємо текст як є
         description_text = message.text.strip()
-        # Спробуємо розділити на нікнейм, опис і соцмережі, але зберігаємо весь текст
         lines = description_text.split('\n')
         nickname = lines[0].strip() if lines else description_text
         description = lines[1].strip() if len(lines) > 1 else description_text
@@ -784,19 +743,17 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     submission_id = str(uuid.uuid4())
     logging.info(f"Фінальна обробка заявки від user_id={user.id}, submission_id={submission_id}. Дані стану: {data}, Фото: {photos}")
 
-    # Перевірка наявності даних
     if not data.get("category"):
         logging.error(f"Відсутня категорія для user_id={user.id}: {data}")
         await bot.send_message(user.id, "⚠️ Помилка: категорія не вказана. Заповніть анкету ще раз.")
         await state.clear()
         return
 
-    # Використовуємо raw_description, якщо є
     description_text = data.get("raw_description", data.get("description", "Невказано"))
-    logging.info(f"Формуємо submission_data: description_text={description_text}, photos={photos}")
-
+    user_display_name = user.full_name if not user.username else user.full_name
+    user_link = f'<a href="tg://user?id={user.id}">{user_display_name}</a>'
     text = (
-        f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
+        f"📥 <b>Нова заявка від</b> {user_link}\n"
         f"<b>Категорія:</b> {data['category']}\n"
         f"<b>Спосіб поширення:</b> {data.get('repost_platform', 'Невказано')}\n"
         f"<b>Посилання на допис:</b> {data.get('repost_link', 'Невказано')}\n"
@@ -842,18 +799,18 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
     try:
         submission_data = {
             "user_id": user.id,
-            "username": user.username or user.first_name,
+            "username": user_display_name,
             "category": data["category"],
             "repost_platform": data.get("repost_platform", ""),
             "repost_link": data.get("repost_link", ""),
             "nickname": data.get("nickname", ""),
             "description": description_text,
             "socials": data.get("socials", ""),
-            "images": photos if photos else [],  # Явно передаємо порожній список
+            "images": photos if photos else [],
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id,
-            "media_message_ids": media_message_ids if media_message_ids else []  # Явно передаємо порожній список
+            "media_message_ids": media_message_ids if media_message_ids else []
         }
         logging.info(f"Підготовлені дані для вставки в Supabase: {submission_data}")
         result = supabase.table("submissions").insert(submission_data).execute()
@@ -884,7 +841,6 @@ async def approve_post(callback: CallbackQuery):
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}, submission_id={submission_id}")
 
     try:
-        # Перевірка існування заявки
         logging.info(f"Перевірка існування заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         check_submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).execute()
         if not check_submission.data:
@@ -893,7 +849,6 @@ async def approve_post(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # Оновлення статусу заявки
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
             "status": "approved",
@@ -908,10 +863,7 @@ async def approve_post(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # Додаємо невелику затримку для забезпечення синхронізації
         await asyncio.sleep(0.5)
-
-        # Повторна перевірка схваленої заявки
         logging.info(f"Отримання схваленої заявки для user_id={user_id}, submission_id={submission_id}")
         submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).eq("status", "approved").execute()
         logging.info(f"Отримані дані заявки: {submission.data}")
@@ -923,12 +875,14 @@ async def approve_post(callback: CallbackQuery):
             return
 
         data = submission.data[0]
+        category_hashtag = CATEGORIES[data['category']]['hashtag']
+        user_display_name = data['username']
+        user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
         post_text = (
-            f"📢 <b>{data['category']}</b>\n\n"
+            f"{category_hashtag}\n\n"
             f"{data['description'] or 'Опис відсутній'}\n\n"
-            f"🌐 <b>Соцмережі:</b>\n{data['socials'] or 'Невказано'}\n"
-            f"👤 Від: <a href=\"tg://user?id={user_id}\">{data['username']}</a>\n"
-            f"#public"
+            f"якщо цікаво ось мої контакти: {data['socials'] or 'Невказано'}\n\n"
+            f"Автор публікації: {user_link}"
         )
 
         if data["images"]:
