@@ -276,7 +276,7 @@ async def process_question(message: Message, state: FSMContext):
         logging.info(f"Створення питання з question_id={question_id}")
 
         # Формування імені користувача
-        user_display_name = message.from_user.full_name if not message.from_user.username else message.from_user.full_name
+        user_display_name = message.from_user.full_name
         user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
 
         question_data = {
@@ -394,7 +394,7 @@ async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
         await state.set_state(Form.answer)
         await callback.answer()
     except Exception as e:
-        logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {e}")
+        logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при обробці питання. Зверніться до розробника.")
         await callback.answer()
 
@@ -427,10 +427,15 @@ async def process_answer(message: Message, state: FSMContext):
         return
 
     try:
+        # Надсилання відповіді користувачу
         await bot.send_message(
             chat_id=user_id,
-            text=f"✉️ Відповідь від адміна: {answer_text}"
+            text=f"✉️ Відповідь від адміна: {answer_text}",
+            parse_mode="HTML"
         )
+        logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
+
+        # Оновлення статусу питання в Supabase
         result = supabase.table("questions").update({
             "status": "answered",
             "answered_at": datetime.utcnow().isoformat(),
@@ -441,12 +446,18 @@ async def process_answer(message: Message, state: FSMContext):
 
         if not result.data:
             logging.error(f"Не вдалося оновити питання в Supabase для user_id={user_id}, question_id={question_id}")
-            await message.answer("⚠️ Помилка при збереженні відповіді. Спробуйте ще раз.")
+            await message.answer(
+                "⚠️ Помилка при збереженні відповіді в базі даних. Відповідь користувачу надіслана.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await state.clear()
             return
 
+        # Повідомлення адмінів про успішну відповідь
         await bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}"
+            text=f"✅ Відповідь надіслано користувачу (ID: {user_id}) адміном {admin_id}:\n\n{answer_text}",
+            parse_mode="HTML"
         )
         await message.answer(
             "✅ Відповідь успішно надіслано користувачу!",
@@ -454,14 +465,21 @@ async def process_answer(message: Message, state: FSMContext):
         )
         await state.clear()
     except TelegramForbiddenError as e:
-        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {e}")
+        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
             "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).",
             reply_markup=ReplyKeyboardRemove()
         )
         await state.clear()
+    except TelegramBadRequest as e:
+        logging.error(f"Помилка TelegramBadRequest при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer(
+            "⚠️ Помилка при надсиланні відповіді користувачу. Перевірте формат повідомлення.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
     except Exception as e:
-        logging.error(f"Помилка при надсиланні відповіді для user_id={user_id}: {e}")
+        logging.error(f"Помилка при обробці відповіді для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
             "⚠️ Виникла помилка при надсиланні відповіді. Спробуйте ще раз або зверніться до розробника.",
             reply_markup=ReplyKeyboardRemove()
@@ -525,9 +543,11 @@ async def handle_category_selection(message: Message, state: FSMContext):
             f"1. Короткий опис\n"
             f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
             f"📌 Приклад:\n"
-            f"Нік: @Artist\n"
-            f"Опис: Шукаю партнерів для колаборації!\n"
-            f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+            f"🖋️ Короткий опис:\n"
+            f"Шукаю партнерів для колаборації!\n\n"
+            f"🌐 Соцмережі:\n"
+            f"Instagram: @artist\n"
+            f"Telegram: @artist\n\n",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -600,9 +620,11 @@ async def process_repost_platform(message: Message, state: FSMContext):
             f"1. Короткий опис\n"
             f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
             f"📌 Приклад:\n"
-            f"Нік: @Artist\n"
-            f"Опис: Продаю персонажа, унікальний дизайн!\n"
-            f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+            f"🖋️ Короткий опис:\n"
+            f"Продаю персонажа, унікальний дизайн!\n\n"
+            f"🌐 Соцмережі:\n"
+            f"Instagram: @artist\n"
+            f"Telegram: @artist\n\n",
             parse_mode="Markdown"
         )
         await state.update_data(repost_link="")
@@ -640,9 +662,11 @@ async def process_repost_link(message: Message, state: FSMContext):
         f"1. Короткий опис\n"
         f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
         f"📌 Приклад:\n"
-        f"Нік: @Artist\n"
-        f"Опис: Продаю персонажа, унікальний дизайн!\n"
-        f"Соцмережі: Instagram: @artist, Telegram: @artist\n\n",
+        f"🖋️ Короткий опис:\n"
+        f"Продаю персонажа, унікальний дизайн!\n\n"
+        f"🌐 Соцмережі:\n"
+        f"Instagram: @artist\n"
+        f"Telegram: @artist\n\n",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="⬅️ Назад")]],
             resize_keyboard=True
@@ -673,12 +697,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
 
     try:
         description_text = message.text.strip()
-        lines = description_text.split('\n')
-        nickname = lines[0].strip() if lines else description_text
-        description = lines[1].strip() if len(lines) > 1 else description_text
-        socials = '\n'.join(lines[2:]).strip() if len(lines) > 2 else ""
-        logging.info(f"Отримано опис: description_text={description_text}, nickname={nickname}, description={description}, socials={socials}")
-        await state.update_data(nickname=nickname, description=description, socials=socials, raw_description=description_text)
+        await state.update_data(raw_description=description_text)
         await message.answer(
             "📸 Хочете додати зображення до заявки? Оберіть варіант:",
             reply_markup=ReplyKeyboardMarkup(
@@ -749,8 +768,8 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await state.clear()
         return
 
-    description_text = data.get("raw_description", data.get("description", "Невказано"))
-    user_display_name = user.full_name if not user.username else user.full_name
+    description_text = data.get("raw_description", "Невказано")
+    user_display_name = user.full_name
     user_link = f'<a href="tg://user?id={user.id}">{user_display_name}</a>'
     text = (
         f"📥 <b>Нова заявка від</b> {user_link}\n"
@@ -803,9 +822,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "category": data["category"],
             "repost_platform": data.get("repost_platform", ""),
             "repost_link": data.get("repost_link", ""),
-            "nickname": data.get("nickname", ""),
             "description": description_text,
-            "socials": data.get("socials", ""),
             "images": photos if photos else [],
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
@@ -880,8 +897,7 @@ async def approve_post(callback: CallbackQuery):
         user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
         post_text = (
             f"{category_hashtag}\n\n"
-            f"{data['description'] or 'Опис відсутній'}\n\n"
-            f"якщо цікаво ось мої контакти: {data['socials'] or 'Невказано'}\n\n"
+            f"{data['description']}\n\n"
             f"Автор публікації: {user_link}"
         )
 
@@ -897,15 +913,15 @@ async def approve_post(callback: CallbackQuery):
         await bot.send_message(user_id, "🎉 Вашу публікацію схвалено та опубліковано в основному чаті!")
         await callback.answer()
     except TelegramBadRequest as e:
-        logging.error(f"Помилка TelegramBadRequest при публікації в основний чат: {e}")
+        logging.error(f"Помилка TelegramBadRequest при публікації в основний чат: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при публікації в основний чат (BadRequest).")
         await callback.answer()
     except TelegramForbiddenError as e:
-        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до основного чату {MAIN_CHAT_ID}: {e}")
+        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до основного чату {MAIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка: бот не має доступу до основного чату.")
         await callback.answer()
     except Exception as e:
-        logging.error(f"Невідома помилка при обробці схвалення: {e}")
+        logging.error(f"Невідома помилка при обробці схвалення: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
         await callback.answer()
 
@@ -931,7 +947,7 @@ async def reject_post(callback: CallbackQuery):
         await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
         await callback.answer()
     except Exception as e:
-        logging.error(f"Помилка при відхиленні заявки: {e}")
+        logging.error(f"Помилка при відхиленні заявки: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
         await callback.answer()
 
@@ -957,7 +973,7 @@ async def error_handler(update, exception):
                 )
             )
     except Exception as e:
-        logging.error(f"Помилка при надсиланні повідомлення про помилку: {e}")
+        logging.error(f"Помилка при надсиланні повідомлення про помилку: {str(e)}\n{traceback.format_exc()}")
     return True
 
 # Запуск фонової задачі при старті
