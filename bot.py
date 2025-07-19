@@ -11,7 +11,6 @@ from typing import List
 import uuid
 
 from supabase import create_client, Client
-
 from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -291,6 +290,7 @@ async def process_question(message: Message, state: FSMContext):
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat()
         }
+        logging.info(f"Підготовлені дані для вставки в таблицю questions: {question_data}")
         try:
             result = supabase.table("questions").insert(question_data).execute()
             logging.info(f"Питання збережено в Supabase: {result.data}")
@@ -299,7 +299,7 @@ async def process_question(message: Message, state: FSMContext):
         except Exception as supabase_error:
             logging.error(f"Помилка Supabase при збереженні питання для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
             await message.answer(
-                "⚠️ Помилка при збереженні питання в базі даних. Спробуйте ще раз або зверніться до @AdminUsername.",
+                "⚠️ Помилка при збереженні питання в базі даних. Перевірте, чи існує таблиця 'questions'. Зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                     resize_keyboard=True
@@ -718,7 +718,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         nickname = lines[0].strip() if lines else description_text
         description = lines[1].strip() if len(lines) > 1 else description_text
         socials = '\n'.join(lines[2:]).strip() if len(lines) > 2 else ""
-
+        logging.info(f"Отримано опис: description_text={description_text}, nickname={nickname}, description={description}, socials={socials}")
         await state.update_data(nickname=nickname, description=description, socials=socials, raw_description=description_text)
         await message.answer(
             "📸 Хочете додати зображення до заявки? Оберіть варіант:",
@@ -741,7 +741,6 @@ async def get_description_and_socials(message: Message, state: FSMContext):
             )
         )
 
-        
 # 🟢 Завершення надсилання зображень
 @router.message(Form.images, F.text == "/done")
 async def done_images(message: Message, state: FSMContext):
@@ -759,7 +758,6 @@ async def submit_without_photos(message: Message, state: FSMContext):
     logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
     await finish_submission(message.from_user, state, photos=[])
 
-    
 # 🟢 Обробка зображень
 @router.message(Form.images, F.photo)
 async def get_images(message: Message, state: FSMContext):
@@ -780,9 +778,7 @@ async def get_images(message: Message, state: FSMContext):
             )
         )
 
-    
-# ✅ Фінальна обробка заявки
-
+# 🟢 Фінальна обробка заявки
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())
@@ -877,13 +873,13 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await bot.send_message(user.id, f"⚠️ Помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
         await state.clear()
         return
-    
+
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
 async def approve_post(callback: CallbackQuery):
     logging.info(f"Callback approve отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
     parts = callback.data.split(":")
-    user_id = int(parts[1])  # Залишаємо int, оскільки user_id у базі — BIGINT
+    user_id = int(parts[1])
     submission_id = parts[2]
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}, submission_id={submission_id}")
 
@@ -897,18 +893,12 @@ async def approve_post(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # Оновлення статусу заявки та очищення даних
+        # Оновлення статусу заявки
         logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
         result = supabase.table("submissions").update({
             "status": "approved",
             "moderated_at": datetime.utcnow().isoformat(),
-            "moderator_id": callback.from_user.id,
-            "description": None,
-            "socials": None,
-            "images": None,
-            "repost_platform": None,
-            "repost_link": None,
-            "nickname": None
+            "moderator_id": callback.from_user.id
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
 
@@ -980,13 +970,7 @@ async def reject_post(callback: CallbackQuery):
             "status": "rejected",
             "moderated_at": datetime.utcnow().isoformat(),
             "moderator_id": callback.from_user.id,
-            "rejection_reason": "Невідповідність вимогам",
-            "description": None,
-            "socials": None,
-            "images": None,
-            "repost_platform": None,
-            "repost_link": None,
-            "nickname": None
+            "rejection_reason": "Невідповідність вимогам"
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
