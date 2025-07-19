@@ -786,7 +786,7 @@ async def get_images(message: Message, state: FSMContext):
 async def finish_submission(user: types.User, state: FSMContext, photos: list):
     data = await state.get_data()
     submission_id = str(uuid.uuid4())
-    logging.info(f"Фінальна обробка заявки від user_id={user.id}, submission_id={submission_id}. Дані: {data}, Фото: {photos}")
+    logging.info(f"Фінальна обробка заявки від user_id={user.id}, submission_id={submission_id}. Дані стану: {data}, Фото: {photos}")
 
     # Перевірка наявності даних
     if not data.get("category"):
@@ -797,6 +797,8 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
 
     # Використовуємо raw_description, якщо є
     description_text = data.get("raw_description", data.get("description", "Невказано"))
+    logging.info(f"Формуємо submission_data: description_text={description_text}, photos={photos}")
+
     text = (
         f"📥 <b>Нова заявка від</b> <a href=\"tg://user?id={user.id}\">{user.username or user.first_name}</a>\n"
         f"<b>Категорія:</b> {data['category']}\n"
@@ -842,7 +844,6 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         return
 
     try:
-        logging.info(f"Збереження заявки в Supabase для user_id={user.id}, submission_id={submission_id}")
         submission_data = {
             "user_id": user.id,
             "username": user.username or user.first_name,
@@ -852,12 +853,13 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             "nickname": data.get("nickname", ""),
             "description": description_text,
             "socials": data.get("socials", ""),
-            "images": photos,
+            "images": photos if photos else [],  # Явно передаємо порожній список
             "status": "pending",
             "submitted_at": datetime.utcnow().isoformat(),
             "submission_id": submission_id,
-            "media_message_ids": media_message_ids
+            "media_message_ids": media_message_ids if media_message_ids else []  # Явно передаємо порожній список
         }
+        logging.info(f"Підготовлені дані для вставки в Supabase: {submission_data}")
         result = supabase.table("submissions").insert(submission_data).execute()
         logging.info(f"Результат вставки в Supabase: {result.data}")
 
@@ -867,7 +869,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             await state.clear()
             return
 
-        logging.info(f"Заявка успішно збережена в Supabase")
+        logging.info(f"Заявка успішно збережена в Supabase: {result.data}")
         await bot.send_message(user.id, "✅ Заявка успішно надіслана на перевірку!")
         await state.clear()
     except Exception as e:
@@ -875,7 +877,6 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         await bot.send_message(user.id, f"⚠️ Помилка при збереженні заявки: {str(e)}. Зверніться до @AdminUsername.")
         await state.clear()
         return
-
     
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
