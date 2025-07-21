@@ -70,7 +70,6 @@ class Form(StatesGroup):
     description = State()
     images = State()
     question = State()
-    answer = State()
 
 # 📋 Категорії та їх хештеги
 CATEGORIES = {
@@ -276,7 +275,7 @@ async def process_question(message: Message, state: FSMContext):
         logging.info(f"Створення питання з question_id={question_id}")
 
         # Формування імені користувача
-        user_display_name = message.from_user.full_name
+        user_display_name = message.from_user.full_name or "Користувач"
         user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
 
         question_data = {
@@ -306,7 +305,9 @@ async def process_question(message: Message, state: FSMContext):
 
         question_message = (
             f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
-            f"{question}"
+            f"{question}\n\n"
+            f"📝 Для відповіді використайте команду:\n"
+            f"/відповісти {user_id} <текст_відповіді>"
         )
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
@@ -384,73 +385,86 @@ async def handle_answer_button(callback: CallbackQuery, state: FSMContext):
             return
 
         await callback.message.answer(
-            f"✉️ Напишіть відповідь для користувача (ID: {user_id}):",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                resize_keyboard=True
-            )
+            f"✉️ Для відповіді користувачу (ID: {user_id}) використайте команду:\n"
+            f"/відповісти {user_id} <текст_відповіді>",
+            parse_mode="HTML"
         )
-        await state.update_data(user_id=user_id, question_id=question_id)
-        await state.set_state(Form.answer)
         await callback.answer()
     except Exception as e:
         logging.error(f"Помилка при обробці кнопки 'Відповісти' для user_id={user_id}, question_id={question_id}: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при обробці питання. Зверніться до розробника.")
         await callback.answer()
 
-# 🟢 Обробка відповіді адміна
-@router.message(Form.answer)
-async def process_answer(message: Message, state: FSMContext):
+# 🟢 Обробка команди /відповісти
+@router.message(Command("відповісти"))
+async def process_answer_command(message: Message, state: FSMContext):
     admin_id = message.from_user.id
-    answer_text = message.text.strip()
-    data = await state.get_data()
-    user_id = data.get("user_id")
-    question_id = data.get("question_id")
-    logging.info(f"Адмін {admin_id} надіслав відповідь для user_id={user_id}, question_id={question_id}: {answer_text}")
-
-    if answer_text == "⬅️ Скасувати":
-        await message.answer(
-            "✅ Обробку відповіді скасовано.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await state.clear()
-        return
-
-    if not answer_text:
-        await message.answer(
-            "⚠️ Будь ласка, напишіть текст відповіді.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                resize_keyboard=True
-            )
-        )
-        return
+    logging.info(f"Адмін {admin_id} використав команду /відповісти: {message.text}")
 
     try:
-        # Надсилання відповіді користувачу
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"✉️ Відповідь від адміна: {answer_text}",
-            parse_mode="HTML"
-        )
-        logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
-
-        # Оновлення статусу питання в Supabase
-        result = supabase.table("questions").update({
-            "status": "answered",
-            "answered_at": datetime.utcnow().isoformat(),
-            "admin_id": admin_id,
-            "answer_text": answer_text
-        }).eq("question_id", question_id).eq("user_id", user_id).execute()
-        logging.info(f"Оновлення статусу питання в Supabase: {result.data}")
-
-        if not result.data:
-            logging.error(f"Не вдалося оновити питання в Supabase для user_id={user_id}, question_id={question_id}")
+        # Розбиваємо команду на частини: /відповісти <user_id> <текст_відповіді>
+        parts = message.text.split(maxsplit=2)
+        if len(parts) < 3:
             await message.answer(
-                "⚠️ Помилка при збереженні відповіді в базі даних. Відповідь користувачу надіслана.",
-                reply_markup=ReplyKeyboardRemove()
+                "⚠️ Неправильний формат команди. Використовуйте: /відповісти <user_id> <текст_відповіді>",
+                parse_mode="HTML"
             )
-            await state.clear()
+            return
+
+        user_id = int(parts[1])
+        answer_text = parts[2].strip()
+        logging.info(f"Обробка відповіді від адміна {admin_id} для user_id={user_id}: {answer_text}")
+
+        # Перевірка, чи існує питання в базі
+        question = supabase.table("questions").select("*").eq("user_id", user_id).eq("status", "pending").execute()
+        if not question.data:
+            await message.answer(
+                "⚠️ Питання від цього користувача не знайдено або вже оброблено.",
+                parse_mode="HTML"
+            )
+            return
+
+        question_id = question.data[0]["question_id"]
+
+        # Надсилання відповіді користувачу
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=f"✉️ Відповідь від адміна: {answer_text}",
+                parse_mode="HTML"
+            )
+            logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
+        except TelegramForbiddenError as e:
+            logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(
+                "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота). Питання буде видалено.",
+                parse_mode="HTML"
+            )
+        except TelegramBadRequest as e:
+            logging.error(f"Помилка TelegramBadRequest при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(
+                "⚠️ Помилка при надсиланні відповіді користувачу. Перевірте формат повідомлення.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Видалення питання з бази даних
+        try:
+            result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+            logging.info(f"Питання видалено з Supabase: {result.data}")
+            if not result.data:
+                logging.warning(f"Не вдалося видалити питання з Supabase для user_id={user_id}, question_id={question_id}")
+                await message.answer(
+                    "⚠️ Відповідь надіслано, але не вдалося видалити питання з бази даних.",
+                    parse_mode="HTML"
+                )
+                return
+        except Exception as e:
+            logging.error(f"Помилка при видаленні питання з Supabase для user_id={user_id}, question_id={question_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(
+                "⚠️ Відповідь надіслано, але виникла помилка при видаленні питання з бази даних.",
+                parse_mode="HTML"
+            )
             return
 
         # Повідомлення адмінів про успішну відповідь
@@ -460,31 +474,21 @@ async def process_answer(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         await message.answer(
-            "✅ Відповідь успішно надіслано користувачу!",
-            reply_markup=ReplyKeyboardRemove()
+            "✅ Відповідь успішно надіслано користувачу, питання видалено з бази даних!",
+            parse_mode="HTML"
         )
-        await state.clear()
-    except TelegramForbiddenError as e:
-        logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+    except ValueError as e:
+        logging.error(f"Помилка формату user_id в команді /відповісти: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).",
-            reply_markup=ReplyKeyboardRemove()
+            "⚠️ Неправильний формат user_id. Використовуйте: /відповісти <user_id> <текст_відповіді>",
+            parse_mode="HTML"
         )
-        await state.clear()
-    except TelegramBadRequest as e:
-        logging.error(f"Помилка TelegramBadRequest при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-        await message.answer(
-            "⚠️ Помилка при надсиланні відповіді користувачу. Перевірте формат повідомлення.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await state.clear()
     except Exception as e:
-        logging.error(f"Помилка при обробці відповіді для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Помилка при обробці команди /відповісти для адміна {admin_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Виникла помилка при надсиланні відповіді. Спробуйте ще раз або зверніться до розробника.",
-            reply_markup=ReplyKeyboardRemove()
+            "⚠️ Виникла помилка при обробці відповіді. Спробуйте ще раз або зверніться до розробника.",
+            parse_mode="HTML"
         )
-        await state.clear()
 
 # 🟢 Обробка повернення до головного меню
 @router.message(F.text == "⬅️ Назад")
@@ -769,7 +773,7 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         return
 
     description_text = data.get("raw_description", "Невказано")
-    user_display_name = user.full_name
+    user_display_name = user.full_name or "Користувач"
     user_link = f'<a href="tg://user?id={user.id}">{user_display_name}</a>'
     text = (
         f"📥 <b>Нова заявка від</b> {user_link}\n"
