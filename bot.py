@@ -70,6 +70,8 @@ class Form(StatesGroup):
     description = State()
     images = State()
     question = State()
+    awaiting_answer = State()  # Новий стан для введення відповіді
+
 
 # 📋 Категорії та їх хештеги
 CATEGORIES = {
@@ -250,6 +252,7 @@ async def handle_other_questions(message: Message, state: FSMContext):
     await state.set_state(Form.question)
 
 
+```python
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
 async def process_question(message: Message, state: FSMContext):
@@ -277,8 +280,6 @@ async def process_question(message: Message, state: FSMContext):
 
         # Формування імені користувача
         user_display_name = (message.from_user.full_name or "Користувач").replace("<", "&lt;").replace(">", "&gt;")
-        user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
-
         question_data = {
             "question_id": question_id,
             "user_id": user_id,
@@ -306,108 +307,6 @@ async def process_question(message: Message, state: FSMContext):
             )
             return
 
-        # Перевірка прав бота в адмінському чаті
-        try:
-            bot_member = await bot.get_chat_member(chat_id=ADMIN_CHAT_ID, user_id=(await bot.get_me()).id)
-            logging.info(f"Статус бота в адмінському чаті {ADMIN_CHAT_ID}: {bot_member.status}")
-            if bot_member.status not in ["administrator", "creator"]:
-                logging.error(f"Бот не має прав адміністратора в чаті {ADMIN_CHAT_ID}")
-                await message.answer(
-                    "⚠️ Бот не має прав надсилати повідомлення до адмінського чату. Зверніться до @AdminUsername.",
-                    reply_markup=ReplyKeyboardMarkup(
-                        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                        resize_keyboard=True
-                    )
-                )
-                return
-        except Exception as e:
-            logging.error(f"Помилка при перевірці прав бота в адмінському чаті {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Не вдалося перевірити права бота в адмінському чаті. Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
-
-        # Формування повідомлення для адмінів
-        question_message = (
-            f"❓ Нове питання від {user_link} (ID: {user_id}):\n\n"
-            f"{question}\n\n"
-            f"📝 Для відповіді використайте команду:\n"
-            f"/відповісти {user_id} <текст_відповіді>"
-        )
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
-        markup = keyboard.as_markup()
-
-        # Надсилання повідомлення до адмінського чату
-        try:
-            await bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=question_message,
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-            logging.info(f"Питання успішно надіслано до адмінського чату для user_id={user_id}, question_id={question_id}")
-        except TelegramRetryAfter as e:
-            logging.warning(f"Обмеження Telegram API, повтор через {e.retry_after} секунд для user_id={user_id}")
-            await asyncio.sleep(e.retry_after)
-            await bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=question_message,
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-            logging.info(f"Питання успішно надіслано після повторної спроби для user_id={user_id}, question_id={question_id}")
-        except TelegramForbiddenError as e:
-            logging.error(f"Помилка TelegramForbiddenError при надсиланні до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Бот не має доступу до адмінського чату (можливо, його видалили або заблокували). Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
-        except TelegramBadRequest as e:
-            logging.error(f"Помилка TelegramBadRequest при надсиланні до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            # Спроба надіслати без HTML для діагностики
-            try:
-                plain_message = (
-                    f"❓ Нове питання від {user_display_name} (ID: {user_id}):\n\n"
-                    f"{question}\n\n"
-                    f"📝 Для відповіді використайте команду:\n"
-                    f"/відповісти {user_id} <текст_відповіді>"
-                )
-                await bot.send_message(
-                    chat_id=ADMIN_CHAT_ID,
-                    text=plain_message,
-                    reply_markup=markup
-                )
-                logging.info(f"Питання надіслано без HTML для user_id={user_id}, question_id={question_id}")
-            except Exception as inner_e:
-                logging.error(f"Помилка при надсиланні без HTML до адмінського чату {ADMIN_CHAT_ID}: {str(inner_e)}\n{traceback.format_exc()}")
-                await message.answer(
-                    "⚠️ Некоректний формат повідомлення для адмінів. Зверніться до @AdminUsername.",
-                    reply_markup=ReplyKeyboardMarkup(
-                        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                        resize_keyboard=True
-                    )
-                )
-                return
-        except Exception as e:
-            logging.error(f"Невідома помилка при надсиланні до адмінського чату {ADMIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Виникла невідома помилка при надсиланні питання до адмінів. Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
-
         await message.answer(
             "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
             reply_markup=ReplyKeyboardMarkup(
@@ -425,6 +324,255 @@ async def process_question(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+
+# 🟢 Команда /код для авторизації адмінів
+@router.message(Command("код"))
+async def cmd_code(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    parts = message.text.split(maxsplit=1)
+    logging.info(f"Адмін {admin_id} ввів команду /код: {message.text}")
+
+    if len(parts) < 2:
+        await message.answer("⚠️ Введіть код. Використовуйте: /код <код>")
+        return
+
+    code = parts[1].strip()
+    if code != "12345":  # Замініть на ваш секретний код
+        logging.warning(f"Невірний код від admin_id={admin_id}: {code}")
+        await message.answer("⚠️ Невірний код. Спробуйте ще раз.")
+        return
+
+    try:
+        # Перевірка, чи адмін уже в базі
+        existing_admin = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+        if existing_admin.data:
+            await message.answer("✅ Ви вже авторизовані як адмін.")
+            return
+
+        # Додавання адміна до таблиці
+        admin_data = {
+            "admin_id": admin_id,
+            "added_at": datetime.utcnow().isoformat()
+        }
+        result = supabase.table("admins").insert(admin_data).execute()
+        logging.info(f"Адмін {admin_id} доданий до таблиці admins: {result.data}")
+        if not result.data:
+            raise ValueError("Не вдалося додати адміна до бази даних")
+
+        await message.answer("✅ Ви успішно авторизовані як адмін! Використовуйте /питання для перегляду питань.")
+    except Exception as e:
+        logging.error(f"Помилка при авторизації адміна {admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer("⚠️ Помилка при авторизації. Зверніться до розробника.")
+
+# 🟢 Команда /питання для адмінів
+@router.message(Command("питання"))
+async def cmd_questions(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    logging.info(f"Адмін {admin_id} використав команду /питання")
+
+    # Перевірка, чи користувач є адміном
+    try:
+        admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+        if not admin_check.data:
+            logging.warning(f"Користувач {admin_id} не є адміном")
+            await message.answer("⚠️ У вас немає доступу до цієї команди. Авторизуйтесь за допомогою /код.")
+            return
+    except Exception as e:
+        logging.error(f"Помилка при перевірці адміна {admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer("⚠️ Помилка при перевірці статусу адміна. Зверніться до розробника.")
+        return
+
+    # Отримання останнього питання зі статусом pending
+    try:
+        question = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at", desc=False).limit(1).execute()
+        logging.info(f"Результат запиту до questions для admin_id={admin_id}: {question.data}")
+        if not question.data:
+            await message.answer("ℹ️ Наразі немає нових питань.")
+            return
+
+        question_data = question.data[0]
+        user_id = question_data["user_id"]
+        question_id = question_data["question_id"]
+        username = question_data["username"]
+        question_text = question_data["question_text"]
+
+        # Формування повідомлення
+        message_text = (
+            f"❓ Питання від {username} (ID: {user_id}):\n\n"
+            f"{question_text}"
+        )
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
+        keyboard.button(text Shape: Skip Shape: Пропустити", callback_data=f"skip:{user_id}:{question_id}")
+        keyboard.button(text="🗑️ Видалити", callback_data=f"delete:{user_id}:{question_id}")
+        markup = keyboard.as_markup()
+
+        await message.answer(
+            message_text,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        logging.error(f"Помилка при отриманні питань для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer("⚠️ Помилка при отриманні питань. Зверніться до розробника.")
+
+# 🟢 Обробка натискання кнопок для команди /питання
+@router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
+async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
+    admin_id = callback.from_user.id
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        logging.error(f"Некоректний формат callback_data: {callback.data}")
+        await callback.message.edit_text("⚠️ Некоректний формат даних.")
+        await callback.answer()
+        return
+
+    action = parts[0]
+    user_id = int(parts[1])
+    question_id = parts[2]
+    logging.info(f"Адмін {admin_id} натиснув кнопку {action} для user_id={user_id}, question_id={question_id}")
+
+    try:
+        # Перевірка, чи адмін авторизований
+        admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+        if not admin_check.data:
+            logging.warning(f"Користувач {admin_id} не є адміном")
+            await callback.message.edit_text("⚠️ У вас немає доступу до цієї дії.")
+            await callback.answer()
+            return
+
+        # Перевірка питання
+        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
+        if not question.data:
+            logging.warning(f"Питання не знайдено або вже оброблено: question_id={question_id}, user_id={user_id}")
+            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
+            await callback.answer()
+            return
+
+        question_text = question.data[0]["question_text"]
+
+        if action == "answer":
+            await callback.message.answer(
+                f"✉️ Введіть відповідь для користувача (ID: {user_id}):\n\n{question_text}",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                    resize_keyboard=True
+                )
+            )
+            await state.set_state("awaiting_answer")
+            await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+        elif action == "skip":
+            await callback.message.edit_text("ℹ️ Питання пропущено.")
+            await callback.answer()
+        elif action == "delete":
+            try:
+                result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+                logging.info(f"Питання видалено: question_id={question_id}, user_id={user_id}, результат: {result.data}")
+                if not result.data:
+                    logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}")
+                    await callback.message.edit_text("⚠️ Не вдалося видалити питання.")
+                else:
+                    await callback.message.edit_text("🗑️ Питання видалено.")
+            except Exception as e:
+                logging.error(f"Помилка при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+                await callback.message.edit_text("⚠️ Помилка при видаленні питання.")
+            await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Помилка при обробці кнопки {action} для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await callback.message.edit_text("⚠️ Помилка при обробці дії.")
+        await callback.answer()
+
+# 🟢 Обробка відповіді адміна
+@router.message(StateFilter("awaiting_answer"))
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+    logging.info(f"Адмін {admin_id} надіслав відповідь: {answer_text}")
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer(
+            "ℹ️ Введення відповіді скасовано.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await state.clear()
+        return
+
+    if not answer_text:
+        await message.answer("⚠️ Текст відповіді не може бути порожнім.")
+        return
+
+    try:
+        data = await state.get_data()
+        user_id = data.get("user_id")
+        question_id = data.get("question_id")
+        question_text = data.get("question_text")
+
+        if not user_id or not question_id:
+            logging.error(f"Немає даних у стані для admin_id={admin_id}: {data}")
+            await message.answer("⚠️ Помилка: дані питання відсутні.")
+            await state.clear()
+            return
+
+        # Перевірка, чи адмін авторизований
+        admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+        if not admin_check.data:
+            logging.warning(f"Користувач {admin_id} не є адміном")
+            await message.answer("⚠️ У вас немає доступу до цієї дії.")
+            await state.clear()
+            return
+
+        # Перевірка питання
+        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
+        if not question.data:
+            logging.warning(f"Питання не знайдено або вже оброблено: question_id={question_id}, user_id={user_id}")
+            await message.answer("⚠️ Питання не знайдено або вже оброблено.")
+            await state.clear()
+            return
+
+        # Надсилання відповіді користувачу
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=f"✉️ Відповідь від адміна на ваше питання:\n\n{question_text}\n\nВідповідь: {answer_text}",
+                parse_mode="HTML"
+            )
+            logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
+        except TelegramForbiddenError as e:
+            logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer("⚠️ Не вдалося надіслати відповідь (користувач заблокував бота). Питання буде видалено.")
+        except TelegramBadRequest as e:
+            logging.error(f"Помилка TelegramBadRequest при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer("⚠️ Некоректний формат повідомлення.")
+            await state.clear()
+            return
+        except Exception as e:
+            logging.error(f"Невідома помилка при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer("⚠️ Помилка при надсиланні відповіді.")
+            await state.clear()
+            return
+
+        # Видалення питання
+        try:
+            result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+            logging.info(f"Питання видалено: question_id={question_id}, user_id={user_id}, результат: {result.data}")
+            if not result.data:
+                logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}")
+                await message.answer("⚠️ Відповідь надіслано, але не вдалося видалити питання з бази даних.")
+            else:
+                await message.answer("✅ Відповідь надіслано користувачу, питання видалено з бази даних!")
+        except Exception as e:
+            logging.error(f"Помилка при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer("⚠️ Відповідь надіслано, але виникла помилка при видаленні питання.")
+        await state.clear()
+
+    except Exception as e:
+        logging.error(f"Помилка при обробці відповіді від admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer("⚠️ Помилка при обробці відповіді. Спробуйте ще раз.")
+        await state.clear()
+
+
 
 # 🟢 /help
 @router.message(Command("help"))
