@@ -252,7 +252,6 @@ async def handle_other_questions(message: Message, state: FSMContext):
     await state.set_state(Form.question)
 
 
-```python
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
 async def process_question(message: Message, state: FSMContext):
