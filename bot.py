@@ -179,15 +179,15 @@ async def cmd_rules(message: Message, state: FSMContext):
     rules_text = (
         "📖 Ознайомся з основними правилами спільноти *Митці ЮА*:\n\n"
         "📜 Правила публікацій:\n"
-        "1. Дотримуйтесь умов для обраної категорії.\n"
+        "1. Дотримуйтесь умов для категорій.\n"
         "2. Надсилайте лише оригінальний контент.\n"
         "3. Не більше 5 зображень на пост.\n"
         "4. Публікації дозволені не частіше, ніж 2 пости на 7 днів.\n"
-        "5. Зробіть репост нашої спільноти в соцмережі або надішліть друзям.\n"
+        "5. Зробіть репост цього допису [нашої спільноти](https://t.me/c/2865535470/16) в соцмережі або надішліть друзям.\n"
         "6. Заборонено NSFW, образливий або незаконний контент.\n"
-        "7. Адміни мають право відхилити заявку з поясненням.\n\n"
+        "7. Адміни мають право відхилити заявку.\n\n"
         "📩 З питаннями: @AdminUsername\n"
-        "👉 [Докладні правила](https://telegra.ph/Pravyla-Mytci-UA)"
+        "👉 [Докладні правила](https://t.me/c/2865535470/16)"
     )
     await message.answer(
         rules_text,
@@ -209,7 +209,7 @@ async def handle_propose_post(message: Message, state: FSMContext):
         recent_submissions = supabase.table("submissions").select("submitted_at").eq("user_id", user_id).gte("submitted_at", seven_days_ago).execute()
         if len(recent_submissions.data) >= 2:
             await message.answer(
-                "⚠️ Ви можете подавати не більше 2 заявок на 7 днів. Спробуйте пізніше!",
+                "⚠️ Ви можете подавати не більше 2 заявок на тиждень. Спробуйте пізніше!",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                     resize_keyboard=True
@@ -374,7 +374,7 @@ async def cmd_questions(message: Message, state: FSMContext):
         admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
         if not admin_check.data:
             logging.warning(f"Користувач {admin_id} не є адміном")
-            await message.answer("⚠️ У вас немає доступу до цієї команди. Авторизуйтесь за допомогою /код.")
+            await message.answer("⚠️ У вас немає доступу до цієї команди.")
             return
     except Exception as e:
         logging.error(f"Помилка при перевірці адміна {admin_id}: {str(e)}\n{traceback.format_exc()}")
@@ -461,7 +461,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
         if action == "answer":
             await callback.message.answer(
-                f"✉️ Введіть відповідь для користувача (ID: {user_id}):\n\n{question_text}",
+                f"Введіть відповідь для користувача (ID: {user_id}):\n\n{question_text}",
                 parse_mode="HTML",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
@@ -480,9 +480,9 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
                 logging.info(f"Результат видалення питання: question_id={question_id}, user_id={user_id}, результат: {result.data}")
                 if not result.data:
                     logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}, порожній результат")
-                    await callback.message.edit_text("⚠️ Не вдалося видалити питання з бази даних.")
+                    await callback.message.edit_text("⚠️ Не вдалося видалити питання.")
                 else:
-                    await callback.message.edit_text("🗑️ Питання успішно видалено з бази даних.")
+                    await callback.message.edit_text("Питання успішно оброблено.")
             except Exception as e:
                 logging.error(f"Помилка Supabase при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
                 await callback.message.edit_text(f"⚠️ Помилка при видаленні питання: {str(e)}")
@@ -502,7 +502,7 @@ async def process_answer(message: Message, state: FSMContext):
 
     if answer_text == "⬅️ Скасувати":
         await message.answer(
-            "ℹ️ Введення відповіді скасовано.",
+            "Введення відповіді скасовано.",
             reply_markup=ReplyKeyboardRemove()
         )
         await state.clear()
