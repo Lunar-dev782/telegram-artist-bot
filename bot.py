@@ -416,6 +416,7 @@ async def cmd_questions(message: Message, state: FSMContext):
         await message.answer("⚠️ Помилка при отриманні питань. Зверніться до розробника.")
 
         
+
 # 🟢 Обробка натискання кнопок для команди /питання
 @router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
@@ -428,8 +429,15 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         return
 
     action = parts[0]
-    user_id = int(parts[1])
-    question_id = parts[2]
+    try:
+        user_id = int(parts[1])
+        question_id = parts[2]
+    except ValueError as e:
+        logging.error(f"Помилка формату user_id в callback_data: {callback.data}, {str(e)}")
+        await callback.message.edit_text("⚠️ Некоректний формат user_id.")
+        await callback.answer()
+        return
+
     logging.info(f"Адмін {admin_id} натиснув кнопку {action} для user_id={user_id}, question_id={question_id}")
 
     try:
@@ -462,26 +470,27 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
             )
             await state.set_state("awaiting_answer")
             await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+            await callback.answer()
         elif action == "skip":
             await callback.message.edit_text("ℹ️ Питання пропущено.")
             await callback.answer()
         elif action == "delete":
             try:
                 result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-                logging.info(f"Питання видалено: question_id={question_id}, user_id={user_id}, результат: {result.data}")
+                logging.info(f"Результат видалення питання: question_id={question_id}, user_id={user_id}, результат: {result.data}")
                 if not result.data:
-                    logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}")
-                    await callback.message.edit_text("⚠️ Не вдалося видалити питання.")
+                    logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}, порожній результат")
+                    await callback.message.edit_text("⚠️ Не вдалося видалити питання з бази даних.")
                 else:
-                    await callback.message.edit_text("🗑️ Питання видалено.")
+                    await callback.message.edit_text("🗑️ Питання успішно видалено з бази даних.")
             except Exception as e:
-                logging.error(f"Помилка при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-                await callback.message.edit_text("⚠️ Помилка при видаленні питання.")
+                logging.error(f"Помилка Supabase при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+                await callback.message.edit_text(f"⚠️ Помилка при видаленні питання: {str(e)}")
             await callback.answer()
 
     except Exception as e:
-        logging.error(f"Помилка при обробці кнопки {action} для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
-        await callback.message.edit_text("⚠️ Помилка при обробці дії.")
+        logging.error(f"Загальна помилка при обробці кнопки {action} для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
+        await callback.message.edit_text("⚠️ Помилка при обробці дії. Зверніться до розробника.")
         await callback.answer()
 
 # 🟢 Обробка відповіді адміна
@@ -556,22 +565,21 @@ async def process_answer(message: Message, state: FSMContext):
         # Видалення питання
         try:
             result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-            logging.info(f"Питання видалено: question_id={question_id}, user_id={user_id}, результат: {result.data}")
+            logging.info(f"Результат видалення питання: question_id={question_id}, user_id={user_id}, результат: {result.data}")
             if not result.data:
-                logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}")
+                logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}, порожній результат")
                 await message.answer("⚠️ Відповідь надіслано, але не вдалося видалити питання з бази даних.")
             else:
-                await message.answer("✅ Відповідь надіслано користувачу, питання видалено з бази даних!")
+                await message.answer("✅ Відповідь надіслано користувачу, питання успішно видалено з бази даних!")
         except Exception as e:
-            logging.error(f"Помилка при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer("⚠️ Відповідь надіслано, але виникла помилка при видаленні питання.")
+            logging.error(f"Помилка Supabase при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+            await message.answer(f"⚠️ Відповідь надіслано, але виникла помилка при видаленні питання: {str(e)}")
         await state.clear()
 
     except Exception as e:
-        logging.error(f"Помилка при обробці відповіді від admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Загальна помилка при обробці відповіді від admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer("⚠️ Помилка при обробці відповіді. Спробуйте ще раз.")
         await state.clear()
-
 
 
 # 🟢 /help
