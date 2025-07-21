@@ -401,9 +401,9 @@ async def cmd_questions(message: Message, state: FSMContext):
             f"{question_text}"
         )
         keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="Відповісти", callback_data=f"answer:{user_id}:{question_id}")
-        keyboard.button(text Shape: Skip Shape:"Пропустити", callback_data=f"skip:{user_id}:{question_id}")
-        keyboard.button(text="Видалити", callback_data=f"delete:{user_id}:{question_id}")
+        keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id}:{question_id}")
+        keyboard.button(text="⏭️ Пропустити", callback_data=f"skip:{user_id}:{question_id}")
+        keyboard.button(text="🗑️ Видалити", callback_data=f"delete:{user_id}:{question_id}")
         markup = keyboard.as_markup()
 
         await message.answer(
@@ -415,6 +415,7 @@ async def cmd_questions(message: Message, state: FSMContext):
         logging.error(f"Помилка при отриманні питань для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer("⚠️ Помилка при отриманні питань. Зверніться до розробника.")
 
+        
 # 🟢 Обробка натискання кнопок для команди /питання
 @router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
