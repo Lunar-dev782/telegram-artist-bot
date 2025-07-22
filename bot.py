@@ -117,7 +117,7 @@ async def check_subscription(user_id: int) -> bool:
         logging.error(f"Невідома помилка при перевірці підписки для user_id={user_id}: {e}")
         return False
 
-# 🟢 Головне меню
+# 🟢 Головне.menu
 async def show_main_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Показ головного меню для користувача {user_id}")
@@ -135,6 +135,7 @@ async def show_main_menu(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
+            await state.clear()  # Очищаємо стан перед поверненням
             return
 
         await message.answer(
@@ -148,11 +149,19 @@ async def show_main_menu(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+        await state.clear()  # Очищаємо попередній стан
         await state.set_state(Form.main_menu)
     except Exception as e:
-        logging.error(f"Помилка в show_main_menu для user_id={user_id}: {e}")
-        await message.answer("⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.")
+        logging.error(f"Помилка в show_main_menu для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer(
+            "⚠️ Виникла помилка. Спробуйте ще раз або зверніться до @AdminUsername.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
 
+        
 # 🟢 Запуск фонової задачі очищення
 async def on_startup():
     asyncio.create_task(cleanup_old_submissions())
@@ -259,7 +268,8 @@ async def process_question(message: Message, state: FSMContext):
     question = message.text.strip()
     logging.info(f"Користувач {user_id} надіслав питання: {question}")
 
-    if question == "⬅️ Назад":
+    if message.text and message.text.strip() == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.question")
         await show_main_menu(message, state)
         return
 
@@ -277,8 +287,7 @@ async def process_question(message: Message, state: FSMContext):
         question_id = str(uuid.uuid4())
         logging.info(f"Створення питання з question_id={question_id}")
 
-        # Формування імені користувача
-        user_display_name = (message.from_user.full_name or "Користувач").replace("<", "&lt;").replace(">", "&gt;")
+        user_display_name = (message.from_user.full_name or "Користувач").replace("<", "<").replace(">", ">")
         question_data = {
             "question_id": question_id,
             "user_id": user_id,
@@ -289,22 +298,10 @@ async def process_question(message: Message, state: FSMContext):
         }
         logging.info(f"Підготовлені дані для вставки в таблицю questions: {question_data}")
 
-        # Збереження питання в Supabase
-        try:
-            result = supabase.table("questions").insert(question_data).execute()
-            logging.info(f"Результат вставки в Supabase: {result.data}")
-            if not result.data:
-                raise ValueError("Не вдалося зберегти питання в Supabase: порожній результат")
-        except Exception as supabase_error:
-            logging.error(f"Помилка Supabase при збереженні питання для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
-            await message.answer(
-                "⚠️ Помилка при збереженні питання. Зверніться до @AdminUsername.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-            return
+        result = supabase.table("questions").insert(question_data).execute()
+        logging.info(f"Результат вставки в Supabase: {result.data}")
+        if not result.data:
+            raise ValueError("Не вдалося зберегти питання в Supabase: порожній результат")
 
         await message.answer(
             "✅ Ваше питання невдовзі буде переглянуто! Очікуйте відповідь протягом доби.",
@@ -612,6 +609,11 @@ async def handle_category_selection(message: Message, state: FSMContext):
     category = message.text
     logging.info(f"Користувач {user_id} обрав категорію: {category}")
 
+    if category == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.category")
+        await show_main_menu(message, state)
+        return
+
     subscription_status = await check_subscription(user_id)
     logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
     if not subscription_status:
@@ -624,6 +626,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+        await state.clear()
         return
 
     await state.update_data(category=category)
@@ -666,6 +669,11 @@ async def process_repost_platform(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав спосіб поширення: {platform}")
 
+    if platform == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_platform")
+        await show_main_menu(message, state)
+        return
+
     if platform not in ["Соцмережа", "Надіслано друзям"]:
         await message.answer(
             "⚠️ Будь ласка, вибери один із запропонованих варіантів: 'Соцмережа' або 'Надіслано друзям'.",
@@ -701,10 +709,10 @@ async def process_repost_platform(message: Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await message.answer(
-        f"✅ Дякуємо за розповсюдження! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-        f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
-        f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
-        f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
+            f"✅ Дякуємо за розповсюдження! Тепер надішліть одним повідомленням:\n\n"
+            f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
+            f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
+            f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
             parse_mode="Markdown"
         )
         await state.update_data(repost_link="")
@@ -718,6 +726,7 @@ async def process_repost_link(message: Message, state: FSMContext):
     logging.info(f"Користувач {user_id} надіслав посилання на допис: {repost_link}")
 
     if repost_link == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_link")
         await show_main_menu(message, state)
         return
 
@@ -760,7 +769,8 @@ async def get_description_and_socials(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} надіслав анкету: {message.text}")
 
-    if message.text == "⬅️ Назад":
+    if message.text and message.text.strip() == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.description")
         await show_main_menu(message, state)
         return
 
