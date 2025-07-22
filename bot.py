@@ -298,7 +298,7 @@ async def process_question(message: Message, state: FSMContext):
         except Exception as supabase_error:
             logging.error(f"Помилка Supabase при збереженні питання для user_id={user_id}, question_id={question_id}: {str(supabase_error)}\n{traceback.format_exc()}")
             await message.answer(
-                "⚠️ Помилка при збереженні питання в базі даних. Перевірте, чи існує таблиця 'questions'. Зверніться до @AdminUsername.",
+                "⚠️ Помилка при збереженні питання. Зверніться до @AdminUsername.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                     resize_keyboard=True
@@ -307,7 +307,7 @@ async def process_question(message: Message, state: FSMContext):
             return
 
         await message.answer(
-            "✅ Ваше питання надіслано адмінам! Очікуйте відповідь протягом доби.",
+            "✅ Ваше питання невдовзі буде переглянуто! Очікуйте відповідь протягом доби.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -345,7 +345,7 @@ async def cmd_code(message: Message, state: FSMContext):
         # Перевірка, чи адмін уже в базі
         existing_admin = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
         if existing_admin.data:
-            await message.answer("✅ Ви вже авторизовані як адмін.")
+            await message.answer("✅ Ви вже авторизовані.")
             return
 
         # Додавання адміна до таблиці
@@ -544,7 +544,7 @@ async def process_answer(message: Message, state: FSMContext):
         try:
             await bot.send_message(
                 chat_id=user_id,
-                text=f"✉️ Відповідь від адміна на ваше питання:\n\n{question_text}\n\nВідповідь: {answer_text}",
+                text=f"✉️ Відповідь на ваше питання:\n\n{question_text}\n\nВідповідь: {answer_text}",
                 parse_mode="HTML"
             )
             logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
@@ -631,14 +631,8 @@ async def handle_category_selection(message: Message, state: FSMContext):
         await message.answer(
             f"✅ Ви обрали категорію {category}: {CATEGORIES[category]['description']}\n\n"
             f"📝 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-            f"1. Короткий опис\n"
-            f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
-            f"📌 Приклад:\n"
-            f"🖋️ Короткий опис:\n"
-            f"Шукаю партнерів для колаборації!\n\n"
-            f"🌐 Соцмережі:\n"
-            f"Instagram: @artist\n"
-            f"Telegram: @artist\n\n",
+            f"1. **Короткий опис**\n"
+            f"2. **Лінки на соцмережі** (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -651,7 +645,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
 
     await message.answer(
         f"✅ Ви обрали категорію {category}: {CATEGORIES[category]['description']}\n\n"
-        f"🔄 Зроби репост [нашої спільноти](https://t.me/community_link) у соцмережі або надішли друзям\n"
+        f"🔄 Зроби репост поста нашої [нашої спільноти](https://t.me/c/2865535470/16) у соцмережі або надішли 3 друзям\n"
         f"📝 Потім заповни анкету\n\n"
         f"Де ти поділився(лась) інформацією?",
         reply_markup=ReplyKeyboardMarkup(
@@ -707,20 +701,16 @@ async def process_repost_platform(message: Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await message.answer(
-            f"📝 Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-            f"1. Короткий опис\n"
-            f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
-            f"📌 Приклад:\n"
-            f"🖋️ Короткий опис:\n"
-            f"Продаю персонажа, унікальний дизайн!\n\n"
-            f"🌐 Соцмережі:\n"
-            f"Instagram: @artist\n"
-            f"Telegram: @artist\n\n",
+        f"✅ Дякуємо за розповсюдження! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
+        f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
+        f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
+        f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
             parse_mode="Markdown"
         )
         await state.update_data(repost_link="")
         await state.set_state(Form.description)
 
+```python
 # 🟢 Обробка посилання на репост
 @router.message(Form.repost_link)
 async def process_repost_link(message: Message, state: FSMContext):
@@ -732,14 +722,17 @@ async def process_repost_link(message: Message, state: FSMContext):
         await show_main_menu(message, state)
         return
 
-    url_pattern = re.compile(
-        r'^(https?://)?'
-        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'
-        r'(/.*)?$'
+    # Регулярний вираз для URL або @нікнейм
+    pattern = re.compile(
+        r'^(https?://)?'  # Дозволяємо http:// або https:// (необов’язково)
+        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'  # Домен (наприклад, t.me, instagram.com)
+        r'(/.*)?$|'  # Шлях (необов’язково) АБО
+        r'^@[a-zA-Z0-9_]{5,}$',  # Формат @нікнейм (мін. 5 символів)
+        re.UNICODE
     )
-    if not url_pattern.match(repost_link):
+    if not pattern.match(repost_link):
         await message.answer(
-            "⚠️ Посилання виглядає некоректним. Будь ласка, надішли правильне посилання на допис (наприклад, https://www.instagram.com/..., https://t.me/...).",
+            "⚠️ Посилання виглядає некоректним. Надішліть посилання у форматі @нікнейм (наприклад, @username) або повне URL (наприклад, https://t.me/username, https://www.instagram.com/username).",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -749,15 +742,10 @@ async def process_repost_link(message: Message, state: FSMContext):
 
     await state.update_data(repost_link=repost_link)
     await message.answer(
-        f"✅ Дякуємо за репост! Тепер надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
-        f"1. Короткий опис\n"
-        f"2. Лінки на соцмережі (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n"
-        f"📌 Приклад:\n"
-        f"🖋️ Короткий опис:\n"
-        f"Продаю персонажа, унікальний дизайн!\n\n"
-        f"🌐 Соцмережі:\n"
-        f"Instagram: @artist\n"
-        f"Telegram: @artist\n\n",
+        f"✅ Дякуємо за репост! Тепер надішліть одним повідомленням:\n\n"
+        f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
+        f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
+        f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="⬅️ Назад")]],
             resize_keyboard=True
@@ -765,6 +753,7 @@ async def process_repost_link(message: Message, state: FSMContext):
         parse_mode="Markdown"
     )
     await state.set_state(Form.description)
+
 
 # 🟢 Опис та соцмережі одним повідомленням
 @router.message(Form.description)
@@ -790,10 +779,10 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         description_text = message.text.strip()
         await state.update_data(raw_description=description_text)
         await message.answer(
-            "📸 Хочете додати зображення до заявки? Оберіть варіант:",
+            "📸 Надішліть до 5 зображень до вашої заявки (прикріпіть їх до одного повідомлення) або оберіть 'Надіслати без фото'.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
-                    [KeyboardButton(text="Надіслати без фото"), KeyboardButton(text="Додати фото")],
+                    [KeyboardButton(text="Надіслати без фото")],
                     [KeyboardButton(text="⬅️ Назад")]
                 ],
                 resize_keyboard=True
