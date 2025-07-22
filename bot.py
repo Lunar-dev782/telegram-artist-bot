@@ -710,7 +710,6 @@ async def process_repost_platform(message: Message, state: FSMContext):
         await state.update_data(repost_link="")
         await state.set_state(Form.description)
 
-```python
 # 🟢 Обробка посилання на репост
 @router.message(Form.repost_link)
 async def process_repost_link(message: Message, state: FSMContext):
