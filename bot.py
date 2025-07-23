@@ -180,32 +180,32 @@ async def check_subscription_again(message: Message, state: FSMContext):
     await show_main_menu(message, state)
 
 # 🟢 Обробка головного меню
-@router.message(Form.main_menu, F.text == "📜 Правила")
-@router.message(Command("rules"))
-async def cmd_rules(message: Message, state: FSMContext):
+@router.message(Form.main_menu)
+async def handle_main_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    logging.info(f"Команда або кнопка /правила від користувача {user_id}")
-    rules_text = (
-        "📖 Ознайомся з основними правилами спільноти *Митці ЮА*:\n\n"
-        "📜 Правила публікацій:\n"
-        "1. Дотримуйтесь умов для категорій.\n"
-        "2. Надсилайте лише оригінальний контент.\n"
-        "3. Не більше 5 зображень на пост.\n"
-        "4. Публікації дозволені не частіше, ніж 2 пости на 7 днів.\n"
-        "5. Зробіть репост цього допису [нашої спільноти](https://t.me/c/2865535470/16) в соцмережі або надішліть друзям.\n"
-        "6. Заборонено NSFW, образливий або незаконний контент.\n"
-        "7. Адміни мають право відхилити заявку.\n\n"
-        "📩 З питаннями: @AdminUsername\n"
-        "👉 [Докладні правила](https://t.me/c/2865535470/16)"
-    )
+    text = message.text.strip()
+    logging.info(f"Користувач {user_id} надіслав текст у стані Form.main_menu: {text}")
+
+    if text == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
+        await show_main_menu(message, state)
+        return
+
+    if text in ["📜 Правила", "📝 Запропонувати пост", "❓ Інші питання"]:
+        # Ці дії обробляються окремими обробниками
+        return
+
     await message.answer(
-        rules_text,
-        parse_mode="Markdown",
+        "⚠️ Виберіть дію з головного меню.",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
             resize_keyboard=True
         )
     )
+    await state.set_state(Form.main_menu)
 
 # 🟢 Обробка "Запропонувати пост"
 @router.message(Form.main_menu, F.text == "📝 Запропонувати пост")
@@ -224,6 +224,7 @@ async def handle_propose_post(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
+            await state.set_state(Form.main_menu)  # Встановлюємо стан головного меню
             return
 
         await message.answer(
@@ -243,6 +244,7 @@ async def handle_propose_post(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+        await state.set_state(Form.main_menu)
 
 # 🟢 Обробка "Інші питання"
 @router.message(Form.main_menu, F.text == "❓ Інші питання")
@@ -582,7 +584,8 @@ async def process_answer(message: Message, state: FSMContext):
 # 🟢 /help
 @router.message(Command("help"))
 async def cmd_help(message: Message, state: FSMContext):
-    logging.info(f"Команда /допомога від користувача {message.from_user.id}")
+    user_id = message.from_user.id
+    logging.info(f"Команда /допомога від користувача {user_id}")
     help_text = (
         "ℹ️ Це бот для подачі заявок на публікацію у спільноті *Митці ЮА*.\n\n"
         "Як це працює:\n"
@@ -601,6 +604,7 @@ async def cmd_help(message: Message, state: FSMContext):
             resize_keyboard=True
         )
     )
+    await state.set_state(Form.main_menu)
 
 # 🟢 Обробка вибору категорії
 @router.message(Form.category, lambda message: message.text in CATEGORIES)
@@ -635,7 +639,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
             f"✅ Ви обрали категорію {category}: {CATEGORIES[category]['description']}\n\n"
             f"📝 Надішли, будь ласка, цю інформацію одним повідомленням:\n\n"
             f"1. **Короткий опис**\n"
-            f"2. **Лінки на соцмережі** (Instagram: @нік, Telegram: @нікнейм, Site: https://blablabla)\n\n",
+            f"2. **Лінки на соцмережі**\n\n",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
                 resize_keyboard=True
@@ -711,8 +715,7 @@ async def process_repost_platform(message: Message, state: FSMContext):
         await message.answer(
             f"✅ Дякуємо за розповсюдження! Тепер надішліть одним повідомленням:\n\n"
             f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
-            f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
-            f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
+            f"2. **Лінки на соцмережі**\n",
             parse_mode="Markdown"
         )
         await state.update_data(repost_link="")
@@ -752,8 +755,7 @@ async def process_repost_link(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Дякуємо за репост! Тепер надішліть одним повідомленням:\n\n"
         f"1. **Короткий опис**: що це за допис, про що він (2-3 речення).\n"
-        f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
-        f"3. **До 5 зображень**: прикріпіть зображення до повідомлення (якщо є).\n\n",
+        f"2. **Лінки на соцмережі**: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="⬅️ Назад")]],
             resize_keyboard=True
@@ -788,7 +790,7 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         description_text = message.text.strip()
         await state.update_data(raw_description=description_text)
         await message.answer(
-            "📸 Надішліть до 5 зображень до вашої заявки (прикріпіть їх до одного повідомлення) або оберіть 'Надіслати без фото'.",
+            "📸 Надішліть до 5 зображень до вашої заявки або оберіть 'Надіслати без фото'.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="Надіслати без фото")],
@@ -1033,7 +1035,7 @@ async def reject_post(callback: CallbackQuery):
         }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
         logging.info(f"Результат оновлення Supabase: {result.data}")
         await callback.message.edit_text("❌ Публікацію відхилено.")
-        await bot.send_message(user_id, "😔 Вашу публікацію відхилено. Причина: Невідповідність вимогам.")
+        await bot.send_message(user_id, "😔 Вашу публікацію відхилено.")
         await callback.answer()
     except Exception as e:
         logging.error(f"Помилка при відхиленні заявки: {str(e)}\n{traceback.format_exc()}")
