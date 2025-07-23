@@ -179,29 +179,31 @@ async def cmd_pochnimo(message: Message, state: FSMContext):
 async def check_subscription_again(message: Message, state: FSMContext):
     await show_main_menu(message, state)
 
-# 🟢 Обробка головного меню
-@router.message(Form.main_menu)
-async def handle_main_menu(message: Message, state: FSMContext):
+
+# 🟢 Обробка /rules або кнопки "📜 Правила"
+@router.message(Form.main_menu, F.text == "📜 Правила")
+@router.message(Command("rules"))
+async def cmd_rules(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    text = message.text.strip()
-    logging.info(f"Користувач {user_id} надіслав текст у стані Form.main_menu: {text}")
-
-    if text == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
-        await show_main_menu(message, state)
-        return
-
-    if text in ["📜 Правила", "📝 Запропонувати пост", "❓ Інші питання"]:
-        # Ці дії обробляються окремими обробниками
-        return
-
+    logging.info(f"Команда або кнопка /правила від користувача {user_id}")
+    rules_text = (
+        "📖 <b>Ознайомся з основними правилами спільноти</b> <i>Митці ЮА</i>:\n\n"
+        "<b>📜 Правила публікацій:</b>\n"
+        "1. <u>Дотримуйтесь умов для категорій</u>.\n"
+        "2. <i>Надсилайте лише оригінальний контент</i>.\n"
+        "3. <s>Не більше 5 зображень на пост</s>.\n"
+        "4. Публікації дозволені не частіше, ніж <b>2 пости на 7 днів</b>.\n"
+        "5. Зробіть репост цього допису <a href='https://t.me/c/2865535470/16'>нашої спільноти</a> в соцмережі або надішліть друзям.\n"
+        "6. <s>Заборонено NSFW, образливий або незаконний контент</s>.\n"
+        "7. Адміни мають право <i>відхилити заявку</i>.\n\n"
+        "📩 З питаннями: <code>@AdminUsername</code>\n"
+        "👉 <a href='https://t.me/c/2865535470/16'>Докладні правила</a>"
+    )
     await message.answer(
-        "⚠️ Виберіть дію з головного меню.",
+        rules_text,
+        parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
             resize_keyboard=True
         )
     )
@@ -224,7 +226,7 @@ async def handle_propose_post(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
-            await state.set_state(Form.main_menu)  # Встановлюємо стан головного меню
+            await state.set_state(Form.main_menu)
             return
 
         await message.answer(
@@ -262,6 +264,46 @@ async def handle_other_questions(message: Message, state: FSMContext):
     )
     await state.set_state(Form.question)
 
+# 🟢 Обробка "⬅️ Назад" у всіх станах
+@router.message(F.text == "⬅️ Назад")
+async def handle_back_button(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    logging.info(f"Користувач {user_id} натиснув 'Назад' у стані {current_state or 'немає стану'}")
+    await show_main_menu(message, state)
+
+# 🟢 Загальний обробник для некоректних дій у Form.main_menu
+@router.message(Form.main_menu)
+async def handle_invalid_main_menu(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав некоректну дію у стані Form.main_menu: {message.text}")
+    await message.answer(
+        "⚠️ Виберіть дію з головного меню.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
+
+# 🟢 Оновлення catch_all_text для обробки некоректних дій
+@router.message()
+async def catch_all_text(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    logging.info(f"DEBUG: Отримано текст: '{message.text}' у стані {current_state or 'немає стану'} від user_id={user_id}")
+
+    await message.answer(
+        f"⚠️ Некоректна дія в поточному стані ({current_state or 'немає стану'}). Виберіть дію з клавіатури.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
 
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
