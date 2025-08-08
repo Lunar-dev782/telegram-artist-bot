@@ -515,73 +515,78 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
     if len(parts) != 3:
-        logging.error(f"Некоректний формат callback_data: {callback.data}")
         await callback.message.edit_text("⚠️ Некоректний формат даних.")
         await callback.answer()
         return
 
-    action = parts[0]
+    action, user_id_str, question_id = parts
     try:
-        user_id = int(parts[1])
-        question_id = parts[2]
-    except ValueError as e:
-        logging.error(f"Помилка формату user_id в callback_data: {callback.data}, {str(e)}")
+        user_id = int(user_id_str)
+    except ValueError:
         await callback.message.edit_text("⚠️ Некоректний формат user_id.")
         await callback.answer()
         return
 
-    logging.info(f"Адмін {admin_id} натиснув кнопку {action} для user_id={user_id}, question_id={question_id}")
-
-    try:
-        admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
-        if not admin_check.data:
-            logging.warning(f"Користувач {admin_id} не є адміном")
-            await callback.message.edit_text("⚠️ У вас немає доступу до цієї дії.")
-            await callback.answer()
-            return
-
-        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
-        if not question.data:
-            logging.warning(f"Питання не знайдено або вже оброблено: question_id={question_id}, user_id={user_id}")
-            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
-            await callback.answer()
-            return
-
-        question_text = question.data[0]["question_text"]
-
-        if action == "answer":
-            await callback.message.answer(
-                f"Введіть відповідь для користувача (ID: {user_id}):\n\n{question_text}",
-                parse_mode="HTML",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                    resize_keyboard=True
-                )
-            )
-            await state.set_state("awaiting_answer")
-            await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
-            await callback.answer()
-        elif action == "skip":
-            await callback.message.edit_text("ℹ️ Питання пропущено.")
-            await callback.answer()
-        elif action == "delete":
-            try:
-                result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-                logging.info(f"Результат видалення питання: question_id={question_id}, user_id={user_id}, результат: {result.data}")
-                if not result.data:
-                    logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}, порожній результат")
-                    await callback.message.edit_text("⚠️ Не вдалося видалити питання.")
-                else:
-                    await callback.message.edit_text("🗑️ Питання успішно видалено.")
-            except Exception as e:
-                logging.error(f"Помилка Supabase при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-                await callback.message.edit_text(f"⚠️ Помилка при видаленні питання: {str(e)}")
-            await callback.answer()
-
-    except Exception as e:
-        logging.error(f"Загальна помилка при обробці кнопки {action} для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
-        await callback.message.edit_text("⚠️ Помилка при обробці дії. Зверніться до розробника.")
+    # Перевірка доступу
+    admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+    if not admin_check.data:
+        await callback.message.edit_text("⚠️ У вас немає доступу.")
         await callback.answer()
+        return
+
+    # Отримуємо питання
+    question = supabase.table("questions").select("*") \
+        .eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
+
+    if not question.data:
+        await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
+        await callback.answer()
+        return
+
+    question_text = question.data[0]["question_text"]
+
+    # Дії
+    if action == "answer":
+        await callback.message.answer(
+            f"Введіть відповідь для {html.escape(question.data[0].get('user_name', 'Користувач'))}:\n\n{html.escape(question_text)}",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state("awaiting_answer")
+        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+    elif action == "skip":
+        await callback.message.edit_text("ℹ️ Питання пропущено.")
+    elif action == "delete":
+        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+        await callback.message.edit_text("🗑️ Питання видалено.")
+
+    await callback.answer()
+
+    # ⬇ Показуємо наступне питання з черги
+    pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
+    if pending.data:
+        next_q = pending.data[0]
+        clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
+        text = (
+            f"📩 Питання від {clickable_name}:\n"
+            f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+            f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
+        )
+        buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+                InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+            ],
+            [
+                InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
+            ]
+        ])
+        await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
+    else:
+        await bot.send_message(admin_id, "✅ Нових питань немає.")
 
 # 🟢 Обробка відповіді адміна
 @router.message(StateFilter("awaiting_answer"))
