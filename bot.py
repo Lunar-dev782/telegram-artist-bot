@@ -40,7 +40,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s - %(message)s')
 
 # 🔐 Токен бота
-TOKEN = "7645134499:AAHmTzyzo8_HjKdkECtrJKEkQE7AtcOBSpU"
+TOKEN = "7645134499:AAGwQnX_2Z6gmLWz2OeykkF4mAG8RNeyyMo"
 ADMIN_CHAT_ID = -1002802098163
 MAIN_CHAT_ID = -1002865535470
 ADMIN_CONTACTS = ["@Admin1", "@Admin2"]
