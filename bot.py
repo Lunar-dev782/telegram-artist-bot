@@ -302,30 +302,6 @@ async def handle_other_questions(message: Message, state: FSMContext):
     )
     await state.set_state(Form.question)
 
-# 🟢 Обробка головного меню (некоректні дії)
-@router.message(Form.main_menu)
-async def handle_invalid_main_menu(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    text = message.text.strip()
-    logging.info(f"Користувач {user_id} надіслав некоректну дію у стані Form.main_menu: {text}")
-
-    if text == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
-        await show_main_menu(message, state)
-        return
-
-    await message.answer(
-        "⚠️ <b>Виберіть дію з головного меню.</b>",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.main_menu)
 
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
