@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List
 import uuid
-
+import html
 from supabase import create_client, Client
 from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.enums import ParseMode
@@ -515,11 +515,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
     if len(parts) != 3:
-        try:
-            await callback.message.edit_text("⚠️ Некоректний формат даних.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("⚠️ Некоректний формат даних.")
         await callback.answer()
         return
 
@@ -527,22 +523,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     try:
         user_id = int(user_id_str)
     except ValueError:
-        try:
-            await callback.message.edit_text("⚠️ Некоректний формат user_id.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("⚠️ Некоректний формат user_id.")
         await callback.answer()
         return
 
     # Перевірка доступу
     admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     if not admin_check.data:
-        try:
-            await callback.message.edit_text("⚠️ У вас немає доступу.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("⚠️ У вас немає доступу.")
         await callback.answer()
         return
 
@@ -551,22 +539,17 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         .eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
 
     if not question.data:
-        try:
-            await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
         await callback.answer()
         return
 
     question_text = question.data[0]["question_text"]
-    user_name = question.data[0].get('user_name', 'Користувач')
-    clickable_name = f"<a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>"
+    user_name = question.data[0].get("user_name", "Користувач")
 
     # Дії
     if action == "answer":
         await callback.message.answer(
-            f"Введіть відповідь для {clickable_name}:\n\n{html.escape(question_text)}",
+            f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
@@ -576,22 +559,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await state.set_state("awaiting_answer")
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
     elif action == "skip":
-        try:
-            await callback.message.edit_text("ℹ️ Питання пропущено.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("ℹ️ Питання пропущено.")
     elif action == "delete":
         supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-        try:
-            await callback.message.edit_text("🗑️ Питання видалено.")
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                raise
+        await callback.message.edit_text("🗑️ Питання видалено.")
 
     await callback.answer()
 
-    # ⬇ Показуємо наступне питання
+    # ⬇ Показуємо наступне питання з черги
     pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
     if pending.data:
         next_q = pending.data[0]
@@ -613,7 +588,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
     else:
         await bot.send_message(admin_id, "✅ Нових питань немає.")
-
+        
         
 # 🟢 Обробка відповіді адміна
 @router.message(StateFilter("awaiting_answer"))
