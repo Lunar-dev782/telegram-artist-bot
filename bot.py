@@ -853,6 +853,7 @@ async def handle_invalid_main_menu(message: Message, state: FSMContext):
         )
     )
     await state.set_state(Form.main_menu)
+
 # 🟢 Обробка натискання кнопок для команди /питання
 @router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
