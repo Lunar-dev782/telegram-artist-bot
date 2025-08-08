@@ -421,296 +421,6 @@ async def process_question(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
 
-# 🟢 Обробка вибору категорії
-@router.message(Form.category)
-async def handle_category_selection(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    category = message.text.strip()
-    logging.info(f"Користувач {user_id} обрав категорію: {category}")
-
-    if category == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.category")
-        await show_main_menu(message, state)
-        return
-
-    if category not in CATEGORIES:
-        await message.answer(
-            "⚠️ <b>Будь ласка, виберіть категорію з запропонованих.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()] + [[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        return
-
-    subscription_status = await check_subscription(user_id)
-    logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
-    if not subscription_status:
-        await message.answer(
-            "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
-            "<a href='https://t.me/+bTmE3LOAMFI5YzBi'>Перейдіть до каналу</a> і натисніть 'Я підписався(лась)'.",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
-                resize_keyboard=True
-            )
-        )
-        await state.clear()
-        return
-
-    await state.update_data(category=category)
-    if category == "📩 Оголошення":
-        await message.answer(
-            f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
-            f"📝 <b>Надішли, будь ласка, цю інформацію одним повідомленням:</b>\n\n"
-            f"1. <b>Короткий опис</b>\n"
-            f"2. <b>Лінки на соцмережі</b>\n\n",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        await state.update_data(repost_platform="", repost_link="")
-        await state.set_state(Form.description)
-        return
-
-    await message.answer(
-        f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
-        f"🔄 <b>Зроби репост поста нашої</b> <a href='https://t.me/c/2865535470/16'>нашої спільноти</a> у соцмережі або надішли 3 друзям\n"
-        f"📝 <b>Потім заповни анкету</b>\n\n"
-        f"Де ти поділився(лась) інформацією?",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
-                [KeyboardButton(text="⬅️ Назад")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.repost_platform)
-
-# 🟢 Обробка вибору платформи для репосту
-@router.message(Form.repost_platform)
-async def process_repost_platform(message: Message, state: FSMContext):
-    platform = message.text.strip()
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} обрав спосіб поширення: {platform}")
-
-    if platform == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_platform")
-        await show_main_menu(message, state)
-        return
-
-    if platform not in ["Соцмережа", "Надіслано друзям"]:
-        await message.answer(
-            "⚠️ <b>Будь ласка, вибери один із запропонованих варіантів:</b> 'Соцмережа' або 'Надіслано друзям'.",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
-                    [KeyboardButton(text="⬅️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
-        return
-
-    await state.update_data(repost_platform=platform)
-    if platform == "Соцмережа":
-        await message.answer(
-            f"🔗 <b>Будь ласка, надішли посилання на соцмережу у якій ви опублікували допис.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(Form.repost_link)
-    else:
-        await message.answer(
-            "✅ <b>Дякуємо! Адмін скоро зв’яжеться з вами для перевірки поширення. Очікуйте!</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        await message.answer(
-            f"✅ <b>Дякуємо за розповсюдження! Тепер надішліть одним повідомленням:</b>\n\n"
-            f"1. <b>Короткий опис</b>\n"
-            f"2. <b>Лінки на соцмережі</b>\n",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        await state.update_data(repost_link="")
-        await state.set_state(Form.description)
-
-# 🟢 Обробка посилання на репост
-@router.message(Form.repost_link)
-async def process_repost_link(message: Message, state: FSMContext):
-    repost_link = message.text.strip()
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} надіслав посилання на допис: {repost_link}")
-
-    if repost_link == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_link")
-        await show_main_menu(message, state)
-        return
-
-    pattern = re.compile(
-        r'^(https?://)?'
-        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'
-        r'(/.*)?$|'
-        r'^@[a-zA-Z0-9_]{5,}$',
-        re.UNICODE
-    )
-    if not pattern.match(repost_link):
-        await message.answer(
-            "⚠️ <b>Посилання виглядає некоректним.</b> Надішліть посилання у форматі @нікнейм (наприклад, @username) або повне URL (наприклад, https://t.me/username, https://www.instagram.com/username).",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        return
-
-    await state.update_data(repost_link=repost_link)
-    await message.answer(
-        f"✅ <b>Дякуємо за репост! Тепер надішліть одним повідомленням:</b>\n\n"
-        f"1. <b>Короткий опис</b>: що це за допис, про що він (2-3 речення).\n"
-        f"2. <b>Лінки на соцмережі</b>: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
-        f"3. <b>До 5 зображень</b>: прикріпіть зображення до повідомлення (якщо є).\n\n",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-    )
-    await state.set_state(Form.description)
-
-# 🟢 Опис та соцмережі одним повідомленням
-@router.message(Form.description)
-async def get_description_and_socials(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} надіслав анкету: {message.text}")
-
-    if message.text and message.text.strip() == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.description")
-        await show_main_menu(message, state)
-        return
-
-    if not message.text:
-        await message.answer(
-            "⚠️ <b>Будь ласка, надішли опис та соцмережі одним повідомленням.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        return
-
-    try:
-        description_text = message.text.strip()
-        await state.update_data(raw_description=description_text)
-        await message.answer(
-            "📸 <b>Надішліть до 5 зображень до вашої заявки (прикріпіть їх до одного повідомлення) або оберіть 'Надіслати без фото'.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="Надіслати без фото")],
-                    [KeyboardButton(text="⬅️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(Form.images)
-    except Exception as e:
-        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-        await message.answer(
-            "⚠️ <b>Помилка обробки повідомлення. Спробуй ще раз.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(Form.images)
-
-# 🟢 Обробка зображень
-@router.message(Form.images)
-async def get_images(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} надіслав повідомлення в стані Form.images: {message.text}")
-
-    if message.text and message.text.strip() == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
-        await show_main_menu(message, state)
-        return
-
-    if message.text == "Надіслати без фото":
-        logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-        await submit_without_photos(message, state)
-        return
-
-    if message.text == "/done":
-        logging.info(f"Користувач {user_id} завершив надсилання зображень")
-        await done_images(message, state)
-        return
-
-    if message.photo:
-        data = await state.get_data()
-        photos = data.get("photos", [])
-        photos.append(message.photo[-1].file_id)
-        logging.info(f"Користувач {user_id} надіслав зображення: {message.photo[-1].file_id}")
-
-        if len(photos) >= 5:
-            await finish_submission(message.from_user, state, photos)
-        else:
-            await state.update_data(photos=photos)
-            await message.answer(
-                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
-                parse_mode="HTML",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-    else:
-        await message.answer(
-            "⚠️ <b>Будь ласка, надішли зображення, натисни 'Надіслати без фото' або /done.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="Надіслати без фото")],
-                    [KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
-
-# 🟢 Надсилання без фото
-@router.message(Form.images, F.text == "Надіслати без фото")
-async def submit_without_photos(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-    await finish_submission(message.from_user, state, photos=[])
-
-# 🟢 Завершення надсилання зображень
-@router.message(Form.images, F.text == "/done")
-async def done_images(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    category = data.get("category", "")
-    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
-    await finish_submission(message.from_user, state, photos)
 
 # 🟢 Універсальний обробник команд
 @router.message(Command(commands=["start", "rules", "help", "питання", "код"]))
@@ -1012,6 +722,300 @@ async def process_answer(message: Message, state: FSMContext):
         logging.error(f"Загальна помилка при обробці відповіді від admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer("⚠️ Помилка при обробці відповіді. Спробуйте ще раз.")
         await state.clear()
+
+
+
+# 🟢 Обробка вибору категорії
+@router.message(Form.category)
+async def handle_category_selection(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    category = message.text.strip()
+    logging.info(f"Користувач {user_id} обрав категорію: {category}")
+
+    if category == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.category")
+        await show_main_menu(message, state)
+        return
+
+    if category not in CATEGORIES:
+        await message.answer(
+            "⚠️ <b>Будь ласка, виберіть категорію з запропонованих.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=cat)] for cat in CATEGORIES.keys()] + [[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    subscription_status = await check_subscription(user_id)
+    logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
+    if not subscription_status:
+        await message.answer(
+            "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
+            "<a href='https://t.me/+bTmE3LOAMFI5YzBi'>Перейдіть до каналу</a> і натисніть 'Я підписався(лась)'.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
+                resize_keyboard=True
+            )
+        )
+        await state.clear()
+        return
+
+    await state.update_data(category=category)
+    if category == "📩 Оголошення":
+        await message.answer(
+            f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
+            f"📝 <b>Надішли, будь ласка, цю інформацію одним повідомленням:</b>\n\n"
+            f"1. <b>Короткий опис</b>\n"
+            f"2. <b>Лінки на соцмережі</b>\n\n",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.update_data(repost_platform="", repost_link="")
+        await state.set_state(Form.description)
+        return
+
+    await message.answer(
+        f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
+        f"🔄 <b>Зроби репост поста нашої</b> <a href='https://t.me/c/2865535470/16'>нашої спільноти</a> у соцмережі або надішли 3 друзям\n"
+        f"📝 <b>Потім заповни анкету</b>\n\n"
+        f"Де ти поділився(лась) інформацією?",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
+                [KeyboardButton(text="⬅️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.repost_platform)
+
+# 🟢 Обробка вибору платформи для репосту
+@router.message(Form.repost_platform)
+async def process_repost_platform(message: Message, state: FSMContext):
+    platform = message.text.strip()
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав спосіб поширення: {platform}")
+
+    if platform == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_platform")
+        await show_main_menu(message, state)
+        return
+
+    if platform not in ["Соцмережа", "Надіслано друзям"]:
+        await message.answer(
+            "⚠️ <b>Будь ласка, вибери один із запропонованих варіантів:</b> 'Соцмережа' або 'Надіслано друзям'.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
+                    [KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    await state.update_data(repost_platform=platform)
+    if platform == "Соцмережа":
+        await message.answer(
+            f"🔗 <b>Будь ласка, надішли посилання на соцмережу у якій ви опублікували допис.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.repost_link)
+    else:
+        await message.answer(
+            "✅ <b>Дякуємо! Адмін скоро зв’яжеться з вами для перевірки поширення. Очікуйте!</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await message.answer(
+            f"✅ <b>Дякуємо за розповсюдження! Тепер надішліть одним повідомленням:</b>\n\n"
+            f"1. <b>Короткий опис</b>\n"
+            f"2. <b>Лінки на соцмережі</b>\n",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.update_data(repost_link="")
+        await state.set_state(Form.description)
+
+# 🟢 Обробка посилання на репост
+@router.message(Form.repost_link)
+async def process_repost_link(message: Message, state: FSMContext):
+    repost_link = message.text.strip()
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав посилання на допис: {repost_link}")
+
+    if repost_link == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.repost_link")
+        await show_main_menu(message, state)
+        return
+
+    pattern = re.compile(
+        r'^(https?://)?'
+        r'([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}'
+        r'(/.*)?$|'
+        r'^@[a-zA-Z0-9_]{5,}$',
+        re.UNICODE
+    )
+    if not pattern.match(repost_link):
+        await message.answer(
+            "⚠️ <b>Посилання виглядає некоректним.</b> Надішліть посилання у форматі @нікнейм (наприклад, @username) або повне URL (наприклад, https://t.me/username, https://www.instagram.com/username).",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    await state.update_data(repost_link=repost_link)
+    await message.answer(
+        f"✅ <b>Дякуємо за репост! Тепер надішліть одним повідомленням:</b>\n\n"
+        f"1. <b>Короткий опис</b>: що це за допис, про що він (2-3 речення).\n"
+        f"2. <b>Лінки на соцмережі</b>: у форматі Instagram: @нікнейм, Telegram: @нікнейм, Сайт: https://example.com.\n"
+        f"3. <b>До 5 зображень</b>: прикріпіть зображення до повідомлення (якщо є).\n\n",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+    )
+    await state.set_state(Form.description)
+
+# 🟢 Опис та соцмережі одним повідомленням
+@router.message(Form.description)
+async def get_description_and_socials(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав анкету: {message.text}")
+
+    if message.text and message.text.strip() == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.description")
+        await show_main_menu(message, state)
+        return
+
+    if not message.text:
+        await message.answer(
+            "⚠️ <b>Будь ласка, надішли опис та соцмережі одним повідомленням.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        return
+
+    try:
+        description_text = message.text.strip()
+        await state.update_data(raw_description=description_text)
+        await message.answer(
+            "📸 <b>Надішліть до 5 зображень до вашої заявки (прикріпіть їх до одного повідомлення) або оберіть 'Надіслати без фото'.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Надіслати без фото")],
+                    [KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.images)
+    except Exception as e:
+        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer(
+            "⚠️ <b>Помилка обробки повідомлення. Спробуй ще раз.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.images)
+
+# 🟢 Обробка зображень
+@router.message(Form.images)
+async def get_images(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} надіслав повідомлення в стані Form.images: {message.text}")
+
+    if message.text and message.text.strip() == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
+        await show_main_menu(message, state)
+        return
+
+    if message.text == "Надіслати без фото":
+        logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+        await submit_without_photos(message, state)
+        return
+
+    if message.text == "/done":
+        logging.info(f"Користувач {user_id} завершив надсилання зображень")
+        await done_images(message, state)
+        return
+
+    if message.photo:
+        data = await state.get_data()
+        photos = data.get("photos", [])
+        photos.append(message.photo[-1].file_id)
+        logging.info(f"Користувач {user_id} надіслав зображення: {message.photo[-1].file_id}")
+
+        if len(photos) >= 5:
+            await finish_submission(message.from_user, state, photos)
+        else:
+            await state.update_data(photos=photos)
+            await message.answer(
+                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+    else:
+        await message.answer(
+            "⚠️ <b>Будь ласка, надішли зображення, натисни 'Надіслати без фото' або /done.</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Надіслати без фото")],
+                    [KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+
+# 🟢 Надсилання без фото
+@router.message(Form.images, F.text == "Надіслати без фото")
+async def submit_without_photos(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+    await finish_submission(message.from_user, state, photos=[])
+
+# 🟢 Завершення надсилання зображень
+@router.message(Form.images, F.text == "/done")
+async def done_images(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    category = data.get("category", "")
+    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
+    await finish_submission(message.from_user, state, photos)
+
 
 # 🟢 /help
 @router.message(Command("help"))
