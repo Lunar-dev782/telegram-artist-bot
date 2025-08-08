@@ -487,7 +487,7 @@ async def handle_commands(message: Message, state: FSMContext):
         logging.info(f"DEBAG: Завершення обробки команди /{command} для user_id={user_id}")
 
 # 🟢 Обробник невідомих команд
-@router.message(Command(commands=[r".*"]))
+@router.message(F.text.startswith("/"))
 async def handle_unknown_command(message: Message, state: FSMContext):
     user_id = message.from_user.id
     command = message.text.split()[0].lstrip("/").lower()
