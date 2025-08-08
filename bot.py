@@ -175,6 +175,38 @@ async def show_main_menu(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
 
+# 🟢 Обробка головного меню (некоректні дії)
+@router.message(Form.main_menu)
+async def handle_invalid_main_menu(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    logging.info(f"Користувач {user_id} надіслав дію у стані Form.main_menu: {text}, тип контенту: {message.content_type}")
+
+    # Пропускаємо команди (починаються з "/")
+    if text.startswith("/"):
+        logging.info(f"Користувач {user_id} ввів команду {text}, пропускаємо обробку в handle_invalid_main_menu")
+        return
+
+    # Обробка кнопки "Назад"
+    if text == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
+        await show_main_menu(message, state)
+        return
+
+    # Відповідь на некоректний ввід (не команда і не кнопка)
+    await message.answer(
+        "⚠️ <b>Виберіть дію з головного меню.</b>",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
+
 # 🟢 Запуск фонової задачі очищення
 async def on_startup():
     asyncio.create_task(cleanup_old_submissions())
@@ -687,6 +719,9 @@ async def cmd_code(message: Message, state: FSMContext):
     parts = message.text.split(maxsplit=1)
     logging.info(f"Адмін {admin_id} ввів команду /код: {message.text}")
 
+    # Очищаємо стан, щоб команда працювала в будь-якому стані
+    await state.clear()
+
     if len(parts) < 2:
         await message.answer("⚠️ Введіть код. Використовуйте: /код <код>")
         return
@@ -722,6 +757,9 @@ async def cmd_code(message: Message, state: FSMContext):
 async def cmd_questions(message: Message, state: FSMContext):
     admin_id = message.from_user.id
     logging.info(f"Адмін {admin_id} використав команду /питання")
+
+    # Очищаємо стан, щоб команда працювала в будь-якому стані
+    await state.clear()
 
     try:
         admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
