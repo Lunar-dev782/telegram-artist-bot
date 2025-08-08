@@ -807,6 +807,52 @@ async def handle_commands(message: Message, state: FSMContext):
     finally:
         logging.info(f"DEBAG: Завершення обробки команди /{command} для user_id={user_id}")
 
+# 🟢 Обробник невідомих команд
+@router.message(Command(commands=[r".*"]))
+async def handle_unknown_command(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    command = message.text.split()[0].lstrip("/").lower()
+    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
+    
+    await message.answer(
+        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
+
+# 🟢 Обробка головного меню (некоректні дії)
+@router.message(Form.main_menu)
+async def handle_invalid_main_menu(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    logging.info(f"Користувач {user_id} надіслав дію у стані Form.main_menu: {text}, тип контенту: {message.content_type}")
+
+    # Обробка кнопки "Назад"
+    if text == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
+        await show_main_menu(message, state)
+        return
+
+    # Відповідь на некоректний ввід
+    await message.answer(
+        "⚠️ <b>Виберіть дію з головного меню.</b>",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
 # 🟢 Обробка натискання кнопок для команди /питання
 @router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
