@@ -175,37 +175,7 @@ async def show_main_menu(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
 
-# 🟢 Обробка головного меню (некоректні дії)
-@router.message(Form.main_menu)
-async def handle_invalid_main_menu(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    text = message.text.strip()
-    logging.info(f"Користувач {user_id} надіслав дію у стані Form.main_menu: {text}, тип контенту: {message.content_type}")
 
-    # Пропускаємо команди (починаються з "/")
-    if text.startswith("/"):
-        logging.info(f"Користувач {user_id} ввів команду {text}, пропускаємо обробку в handle_invalid_main_menu")
-        return
-
-    # Обробка кнопки "Назад"
-    if text == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.main_menu")
-        await show_main_menu(message, state)
-        return
-
-    # Відповідь на некоректний ввід (не команда і не кнопка)
-    await message.answer(
-        "⚠️ <b>Виберіть дію з головного меню.</b>",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.main_menu)
 
 # 🟢 Запуск фонової задачі очищення
 async def on_startup():
