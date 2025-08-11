@@ -546,14 +546,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     question_text = question.data[0]["question_text"]
     user_name = question.data[0].get("user_name", "Користувач")
 
-    # Дії
+        # Дії
     if action == "answer":
-    await callback.message.answer(
-        f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-            resize_keyboard=True
+        await callback.message.answer(
+            f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
         )
     )
     await state.set_state("awaiting_answer")
