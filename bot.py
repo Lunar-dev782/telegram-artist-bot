@@ -554,21 +554,21 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
                 resize_keyboard=True
+            )
         )
-    )
-    await state.set_state("awaiting_answer")
-    await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+        await state.set_state("awaiting_answer")
+        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+        await callback.answer()
+        return  # 🛑 ВАЖЛИВО! Щоб не показувати знову те саме питання
+
+    elif action == "skip":
+        await callback.message.edit_text("ℹ️ Питання пропущено.")
+
+    elif action == "delete":
+        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+        await callback.message.edit_text("🗑️ Питання видалено.")
+
     await callback.answer()
-    return  # 🛑 ВАЖЛИВО! Щоб не показувати знову те саме питання
-
-elif action == "skip":
-    await callback.message.edit_text("ℹ️ Питання пропущено.")
-
-elif action == "delete":
-    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-    await callback.message.edit_text("🗑️ Питання видалено.")
-
-await callback.answer()
 
 # Цей блок виконується лише після skip/delete
 pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
