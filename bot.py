@@ -548,47 +548,51 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
     # Дії
     if action == "answer":
-        await callback.message.answer(
-            f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                resize_keyboard=True
-            )
+    await callback.message.answer(
+        f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+            resize_keyboard=True
         )
-        await state.set_state("awaiting_answer")
-        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
-    elif action == "skip":
-        await callback.message.edit_text("ℹ️ Питання пропущено.")
-    elif action == "delete":
-        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-        await callback.message.edit_text("🗑️ Питання видалено.")
-
+    )
+    await state.set_state("awaiting_answer")
+    await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
     await callback.answer()
+    return  # 🛑 ВАЖЛИВО! Щоб не показувати знову те саме питання
 
-    # ⬇ Показуємо наступне питання з черги
-    pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
-    if pending.data:
-        next_q = pending.data[0]
-        clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
-        text = (
-            f"📩 Питання від {clickable_name}:\n"
-            f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
-            f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
-        )
-        buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-                InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
-            ],
-            [
-                InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
-            ]
-        ])
-        await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
-    else:
-        await bot.send_message(admin_id, "✅ Нових питань немає.")
-        
+elif action == "skip":
+    await callback.message.edit_text("ℹ️ Питання пропущено.")
+
+elif action == "delete":
+    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+    await callback.message.edit_text("🗑️ Питання видалено.")
+
+await callback.answer()
+
+# Цей блок виконується лише після skip/delete
+pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
+if pending.data:
+    next_q = pending.data[0]
+    clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
+    text = (
+        f"📩 Питання від {clickable_name}:\n"
+        f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+        f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
+    )
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+            InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+        ],
+        [
+            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
+        ]
+    ])
+    await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
+else:
+    await bot.send_message(admin_id, "✅ Нових питань немає.")
+  
         
 # 🟢 Обробка відповіді адміна
 @router.message(StateFilter("awaiting_answer"))
