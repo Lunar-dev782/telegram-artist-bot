@@ -515,23 +515,26 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
     if len(parts) != 3:
-        await callback.message.edit_text("⚠️ Некоректний формат даних.")
-        await callback.answer()
+        await callback.answer("⚠️ Некоректний формат даних.")
         return
 
     action, user_id_str, question_id = parts
     try:
         user_id = int(user_id_str)
     except ValueError:
-        await callback.message.edit_text("⚠️ Некоректний формат user_id.")
-        await callback.answer()
+        await callback.answer("⚠️ Некоректний формат user_id.")
         return
 
     # Перевірка доступу
     admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     if not admin_check.data:
-        await callback.message.edit_text("⚠️ У вас немає доступу.")
-        await callback.answer()
+        await callback.answer("⚠️ У вас немає доступу.")
+        return
+
+    # Якщо адмін уже в процесі відповіді — не брати нове питання
+    current_state = await state.get_state()
+    if current_state == "awaiting_answer" and action == "answer":
+        await callback.answer("Ви вже відповідаєте на інше питання.")
         return
 
     # Отримуємо питання
@@ -539,19 +542,19 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         .eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
 
     if not question.data:
-        await callback.message.edit_text("⚠️ Питання не знайдено або вже оброблено.")
-        await callback.answer()
+        await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
         return
 
     question_text = question.data[0]["question_text"]
     user_name = question.data[0].get("user_name", "Користувач")
 
-        # Дії
     if action == "answer":
         supabase.table("questions").update({"status": "in_progress"}).eq("question_id", question_id).execute()
 
-        await callback.message.answer(
-            f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
+        await bot.send_message(
+            admin_id,
+            f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
+            f"{html.escape(question_text)}",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
@@ -561,7 +564,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await state.set_state("awaiting_answer")
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
         await callback.answer()
-        return  # 🛑 Щоб не показувати знову те саме питання
+        return  # 🛑 Не показуємо наступні питання
 
     elif action == "skip":
         await callback.message.edit_text("ℹ️ Питання пропущено.")
@@ -572,7 +575,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-    # Цей блок виконується лише після skip/delete
+    # Після skip/delete показуємо наступне питання
     pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
     if pending.data:
         next_q = pending.data[0]
