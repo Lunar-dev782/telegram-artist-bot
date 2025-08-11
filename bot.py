@@ -570,29 +570,30 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-# Цей блок виконується лише після skip/delete
-pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
-if pending.data:
-    next_q = pending.data[0]
-    clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
-    text = (
-        f"📩 Питання від {clickable_name}:\n"
-        f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
-        f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
-    )
-    buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-            InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
-        ],
-        [
-            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
-        ]
-    ])
-    await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
-else:
-    await bot.send_message(admin_id, "✅ Нових питань немає.")
-  
+    # Цей блок виконується лише після skip/delete
+    pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
+    if pending.data:
+        next_q = pending.data[0]
+        clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
+        text = (
+            f"📩 Питання від {clickable_name}:\n"
+            f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+            f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
+        )
+        buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+                InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+            ],
+            [
+                InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
+            ]
+        ])
+        await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
+    else:
+        await bot.send_message(admin_id, "✅ Нових питань немає.")
+
+
         
 # 🟢 Обробка відповіді адміна
 @router.message(StateFilter("awaiting_answer"))
