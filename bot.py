@@ -547,19 +547,21 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     user_name = question.data[0].get("user_name", "Користувач")
 
         # Дії
-    if action == "answer":
-        await callback.message.answer(
-            f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                resize_keyboard=True
-            )
+if action == "answer":
+    supabase.table("questions").update({"status": "in_progress"}).eq("question_id", question_id).execute()
+
+    await callback.message.answer(
+        f"Введіть відповідь для {html.escape(user_name)}:\n\n{html.escape(question_text)}",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+            resize_keyboard=True
         )
-        await state.set_state("awaiting_answer")
-        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
-        await callback.answer()
-        return  # 🛑 ВАЖЛИВО! Щоб не показувати знову те саме питання
+    )
+    await state.set_state("awaiting_answer")
+    await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+    await callback.answer()
+    return  # 🛑 Щоб не показувати знову те саме питання
 
     elif action == "skip":
         await callback.message.edit_text("ℹ️ Питання пропущено.")
