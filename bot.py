@@ -625,32 +625,143 @@ async def process_answer(message: Message, state: FSMContext):
 
 
 
-# ===== ФУНКЦІЯ ВІДПРАВКИ НАСТУПНОГО ПИТАННЯ =====
+# ===== ОБРОБКА КНОПОК ПРОДОВЖЕННЯ / ЗУПИНКИ =====
+@router.callback_query(F.data == "continue_answering")
+async def continue_answering(callback: CallbackQuery):
+    await callback.answer()
+    await send_next_question(callback.from_user.id)
+
+@router.callback_query(F.data == "stop_answering")
+async def stop_answering(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer("⛔ Ви завершили сеанс відповідей.")
+    await callback.message.edit_text("✅ Сеанс завершено.")
+
+# ===== ОБРОБКА КНОПОК ВІДПОВІДІ / ПРОПУСКУ / ВИДАЛЕННЯ =====
+@router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
+async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
+    admin_id = callback.from_user.id
+    action, user_id_str, question_id = callback.data.split(":")
+    user_id = int(user_id_str)
+
+    # Перевірка доступу
+    admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+    if not admin_check.data:
+        await callback.answer("⚠️ У вас немає доступу.")
+        return
+
+    # Отримуємо питання
+    question = supabase.table("questions").select("*") \
+        .eq("question_id", question_id).eq("user_id", user_id).execute()
+
+    if not question.data:
+        await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
+        return
+
+    q_data = question.data[0]
+    question_text = q_data["question_text"]
+    user_name = q_data.get("username", "Користувач")
+
+    if action == "answer":
+        await callback.message.answer(
+            f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
+            f"{html.escape(question_text)}",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(AdminAnswer.awaiting_answer)
+        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
+        await callback.answer()
+        return
+
+    elif action == "skip":
+        supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
+        await callback.answer("⏭ Пропущено")
+        await send_next_question(admin_id)
+
+    elif action == "delete":
+        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+        await callback.answer("🗑 Видалено")
+        await send_next_question(admin_id)
+
+# ===== ОБРОБКА ВІДПОВІДІ =====
+@router.message(AdminAnswer.awaiting_answer)
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer("✅ Відповідь скасовано.", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        await send_next_question(admin_id)
+        return
+
+    if not answer_text:
+        await message.answer("⚠️ Відповідь не може бути порожньою.")
+        return
+
+    data = await state.get_data()
+    user_id = data["user_id"]
+    question_id = data["question_id"]
+    question_text = data["question_text"]
+
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
+            parse_mode="HTML"
+        )
+    except TelegramForbiddenError:
+        await message.answer("⚠️ Користувач заблокував бота.")
+
+    supabase.table("questions").update({
+        "status": "answered",
+        "answered_at": datetime.utcnow().isoformat(),
+        "admin_id": admin_id,
+        "answer_text": answer_text
+    }).eq("question_id", question_id).eq("user_id", user_id).execute()
+
+    await message.answer(
+        "✅ Відповідь надіслано.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    # Показуємо кнопки продовження / зупинки
+    cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering")],
+        [InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
+    ])
+    await message.answer("Виберіть дію:", reply_markup=cont_buttons)
+    await state.clear()
+
+# ===== ВІДПРАВКА НАСТУПНОГО ПИТАННЯ =====
 async def send_next_question(admin_id: int):
-    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("created_at").execute()
+    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
     total = len(pending_qs.data)
 
-    if total > 0:
-        next_q = pending_qs.data[0]
-        clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
-        text = (
-            f"📩 Питання від {clickable_name} (1/{total}):\n"
-            f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
-            f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
-        )
-        buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-                InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
-            ],
-            [
-                InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
-            ]
-        ])
-        await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
-    else:
+    if total == 0:
         await bot.send_message(admin_id, "✅ Нових питань немає.")
+        return
 
+    next_q = pending_qs.data[0]
+    position = total  # поточне питання завжди буде "1/total"
+    clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('username', 'Користувач'))}</a>"
+    text = (
+        f"📩 Питання від {clickable_name} (1/{total}):\n"
+        f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+        f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
+    )
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+            InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+        ],
+        [InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")]
+    ])
+    await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
 
         
 # 🟢 Обробка вибору категорії
