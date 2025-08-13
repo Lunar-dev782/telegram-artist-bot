@@ -513,7 +513,6 @@ async def handle_invalid_main_menu(message: Message, state: FSMContext):
 class AdminAnswer(StatesGroup):
     awaiting_answer = State()
 
-
 # ===== ОБРОБКА КНОПОК ВІДПОВІДІ / ПРОПУСКУ / ВИДАЛЕННЯ =====
 @router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
@@ -545,11 +544,11 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         return
 
     question_text = question.data[0]["question_text"]
-    user_name = question.data[0].get("user_name", "Користувач")
+    user_name = question.data[0].get("username", "Користувач")  # у тебе в БД колонка "username", а не "user_name"
 
     if action == "answer":
-        supabase.table("questions").update({"status": "in_progress"}).eq("question_id", question_id).execute()
-
+        # Ми не змінюємо статус на in_progress, бо його немає у БД
+        # Просто залишаємо "pending", доки адмін не надішле відповідь
         await callback.message.answer(
             f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
             f"{html.escape(question_text)}",
@@ -566,6 +565,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         return
 
     elif action == "skip":
+        supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
         await callback.message.edit_text("ℹ️ Питання пропущено.")
 
     elif action == "delete":
@@ -611,12 +611,18 @@ async def process_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Видалення питання
-    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+    # Оновлюємо статус на "answered" і зберігаємо відповідь
+    supabase.table("questions").update({
+        "status": "answered",
+        "answered_at": datetime.utcnow().isoformat(),
+        "admin_id": admin_id,
+        "answer_text": answer_text
+    }).eq("question_id", question_id).eq("user_id", user_id).execute()
 
     await message.answer("✅ Відповідь надіслано.", reply_markup=ReplyKeyboardRemove())
     await state.clear()
     await send_next_question(admin_id)
+
 
 
 # ===== ФУНКЦІЯ ВІДПРАВКИ НАСТУПНОГО ПИТАННЯ =====
