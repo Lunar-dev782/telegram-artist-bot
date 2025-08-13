@@ -509,8 +509,13 @@ async def handle_invalid_main_menu(message: Message, state: FSMContext):
     )
     await state.set_state(Form.main_menu)
 
-# 🟢 Обробка натискання кнопок для команди /питання
-@router.callback_query(lambda c: c.data.startswith(("answer:", "skip:", "delete:")))
+# ===== СТАНИ =====
+class AdminAnswer(StatesGroup):
+    awaiting_answer = State()
+
+
+# ===== ОБРОБКА КНОПОК ВІДПОВІДІ / ПРОПУСКУ / ВИДАЛЕННЯ =====
+@router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
@@ -522,19 +527,13 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     try:
         user_id = int(user_id_str)
     except ValueError:
-        await callback.answer("⚠️ Некоректний формат user_id.")
+        await callback.answer("⚠️ Некоректний user_id.")
         return
 
     # Перевірка доступу
     admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     if not admin_check.data:
         await callback.answer("⚠️ У вас немає доступу.")
-        return
-
-    # Якщо адмін уже в процесі відповіді
-    current_state = await state.get_state()
-    if current_state == "awaiting_answer" and action == "answer":
-        await callback.answer("Ви вже відповідаєте на інше питання.")
         return
 
     # Отримуємо питання
@@ -551,8 +550,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     if action == "answer":
         supabase.table("questions").update({"status": "in_progress"}).eq("question_id", question_id).execute()
 
-        await bot.send_message(
-            admin_id,
+        await callback.message.answer(
             f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
             f"{html.escape(question_text)}",
             parse_mode="HTML",
@@ -561,10 +559,11 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
                 resize_keyboard=True
             )
         )
-        await state.set_state("awaiting_answer")
+
+        await state.set_state(AdminAnswer.awaiting_answer)
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
         await callback.answer()
-        return  # 🛑 не показуємо наступне питання автоматично
+        return
 
     elif action == "skip":
         await callback.message.edit_text("ℹ️ Питання пропущено.")
@@ -574,10 +573,57 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("🗑️ Питання видалено.")
 
     await callback.answer()
+    await send_next_question(admin_id)
 
-    # Показуємо наступне питання з нумерацією
+
+# ===== ОБРОБКА ВІДПОВІДІ АДМІНА =====
+@router.message(AdminAnswer.awaiting_answer)
+async def process_answer(message: Message, state: FSMContext):
+    admin_id = message.from_user.id
+    answer_text = message.text.strip()
+
+    if answer_text == "⬅️ Скасувати":
+        await message.answer("✅ Введення відповіді скасовано.", reply_markup=ReplyKeyboardRemove())
+        await state.clear()
+        await send_next_question(admin_id)
+        return
+
+    if not answer_text:
+        await message.answer("⚠️ Текст відповіді не може бути порожнім.")
+        return
+
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
+    question_text = data.get("question_text")
+
+    # Відправка відповіді користувачу
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
+            parse_mode="HTML"
+        )
+    except TelegramForbiddenError:
+        await message.answer("⚠️ Користувач заблокував бота.")
+    except Exception as e:
+        await message.answer(f"⚠️ Помилка при надсиланні: {e}")
+        await state.clear()
+        return
+
+    # Видалення питання
+    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+
+    await message.answer("✅ Відповідь надіслано.", reply_markup=ReplyKeyboardRemove())
+    await state.clear()
+    await send_next_question(admin_id)
+
+
+# ===== ФУНКЦІЯ ВІДПРАВКИ НАСТУПНОГО ПИТАННЯ =====
+async def send_next_question(admin_id: int):
     pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("created_at").execute()
     total = len(pending_qs.data)
+
     if total > 0:
         next_q = pending_qs.data[0]
         clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
@@ -600,84 +646,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await bot.send_message(admin_id, "✅ Нових питань немає.")
 
 
-# 🟢 Обробка відповіді адміна
-@router.message(StateFilter("awaiting_answer"))
-async def process_answer(message: Message, state: FSMContext):
-    admin_id = message.from_user.id
-    answer_text = message.text.strip()
-
-    if answer_text == "⬅️ Скасувати":
-        await message.answer("✅ Введення відповіді скасовано.", reply_markup=ReplyKeyboardRemove())
-        await state.clear()
-        return
-
-    if not answer_text:
-        await message.answer("⚠️ Текст відповіді не може бути порожнім.")
-        return
-
-    data = await state.get_data()
-    user_id = data.get("user_id")
-    question_id = data.get("question_id")
-    question_text = data.get("question_text")
-
-    # Відправка відповіді користувачу
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{question_text}\n\n<b>Відповідь:</b> {answer_text}",
-            parse_mode="HTML"
-        )
-    except TelegramForbiddenError:
-        await message.answer("⚠️ Користувач заблокував бота.")
-    except Exception as e:
-        await message.answer(f"⚠️ Помилка при надсиланні: {e}")
-        await state.clear()
-        return
-
-    # Видалення питання
-    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-
-    # Кнопки продовження
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="▶️ Продовжити", callback_data="continue_questions")],
-        [InlineKeyboardButton(text="⏹ Зупинитись", callback_data="stop_questions")]
-    ])
-    await message.answer("✅ Відповідь надіслано.\nЩо робимо далі?", reply_markup=kb)
-    await state.clear()
-
-
-# 🟢 Обробка кнопок після відповіді
-@router.callback_query(lambda c: c.data in ("continue_questions", "stop_questions"))
-async def handle_continue_stop(callback: CallbackQuery, state: FSMContext):
-    if callback.data == "continue_questions":
-        pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("created_at").execute()
-        total = len(pending_qs.data)
-        if total > 0:
-            next_q = pending_qs.data[0]
-            clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
-            text = (
-                f"📩 Питання від {clickable_name} (1/{total}):\n"
-                f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
-                f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
-            )
-            buttons = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-                    InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
-                ],
-                [
-                    InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
-                ]
-            ])
-            await bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=buttons)
-        else:
-            await bot.send_message(callback.from_user.id, "✅ Нових питань немає.")
-    else:
-        await callback.message.edit_text("⏹ Ви зупинили перегляд питань.")
-    await callback.answer()
-
-
-
+        
 # 🟢 Обробка вибору категорії
 @router.message(Form.category)
 async def handle_category_selection(message: Message, state: FSMContext):
