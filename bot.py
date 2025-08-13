@@ -513,6 +513,7 @@ async def handle_invalid_main_menu(message: Message, state: FSMContext):
 class AdminAnswer(StatesGroup):
     awaiting_answer = State()
 
+
 # ===== ОБРОБКА КНОПОК ВІДПОВІДІ / ПРОПУСКУ / ВИДАЛЕННЯ =====
 @router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
@@ -538,17 +539,16 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     # Отримуємо питання
     question = supabase.table("questions").select("*") \
         .eq("question_id", question_id).eq("user_id", user_id).execute()
-
     if not question.data:
         await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
         return
 
-    question_text = question.data[0]["question_text"]
-    user_name = question.data[0].get("username", "Користувач")  # у тебе в БД колонка "username", а не "user_name"
+    q_data = question.data[0]
+    question_text = q_data["question_text"]
+    user_name = q_data.get("username", "Користувач")
 
     if action == "answer":
-        # Ми не змінюємо статус на in_progress, бо його немає у БД
-        # Просто залишаємо "pending", доки адмін не надішле відповідь
+        # Відправка запиту на введення відповіді
         await callback.message.answer(
             f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
             f"{html.escape(question_text)}",
@@ -558,22 +558,31 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
                 resize_keyboard=True
             )
         )
-
         await state.set_state(AdminAnswer.awaiting_answer)
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
         await callback.answer()
         return
 
     elif action == "skip":
-        supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
-        await callback.message.edit_text("ℹ️ Питання пропущено.")
+        # Використовуємо "pending", бо "skipped" не дозволений
+        try:
+            supabase.table("questions").update({"status": "pending"}).eq("question_id", question_id).eq("user_id", user_id).execute()
+        except Exception as e:
+            await callback.answer(f"⚠️ Помилка при пропуску: {e}")
+            return
+        await callback.answer("⏭ Питання пропущено.")
+        await send_next_question(admin_id)
+        return
 
     elif action == "delete":
-        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-        await callback.message.edit_text("🗑️ Питання видалено.")
-
-    await callback.answer()
-    await send_next_question(admin_id)
+        try:
+            supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+        except Exception as e:
+            await callback.answer(f"⚠️ Помилка при видаленні: {e}")
+            return
+        await callback.answer("🗑 Питання видалено.")
+        await send_next_question(admin_id)
+        return
 
 
 # ===== ОБРОБКА ВІДПОВІДІ АДМІНА =====
@@ -593,9 +602,9 @@ async def process_answer(message: Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    user_id = data.get("user_id")
-    question_id = data.get("question_id")
-    question_text = data.get("question_text")
+    user_id = data["user_id"]
+    question_id = data["question_id"]
+    question_text = data["question_text"]
 
     # Відправка відповіді користувачу
     try:
@@ -611,21 +620,31 @@ async def process_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Оновлюємо статус на "answered" і зберігаємо відповідь
-    supabase.table("questions").update({
-        "status": "answered",
-        "answered_at": datetime.utcnow().isoformat(),
-        "admin_id": admin_id,
-        "answer_text": answer_text
-    }).eq("question_id", question_id).eq("user_id", user_id).execute()
+    # Оновлення статусу та збереження відповіді
+    try:
+        supabase.table("questions").update({
+            "status": "answered",
+            "answered_at": datetime.utcnow().isoformat(),
+            "admin_id": admin_id,
+            "answer_text": answer_text
+        }).eq("question_id", question_id).eq("user_id", user_id).execute()
+    except Exception as e:
+        await message.answer(f"⚠️ Помилка при оновленні в БД: {e}")
+        await state.clear()
+        return
 
     await message.answer("✅ Відповідь надіслано.", reply_markup=ReplyKeyboardRemove())
+
+    # Кнопки продовження / зупинки
+    cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering")],
+        [InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
+    ])
+    await message.answer("Виберіть дію:", reply_markup=cont_buttons)
     await state.clear()
-    await send_next_question(admin_id)
 
 
-
-# ===== ОБРОБКА КНОПОК ПРОДОВЖЕННЯ / ЗУПИНКИ =====
+# ===== ПРОДОВЖЕННЯ / ЗУПИНКА СЕАНСУ =====
 @router.callback_query(F.data == "continue_answering")
 async def continue_answering(callback: CallbackQuery):
     await callback.answer()
@@ -637,105 +656,6 @@ async def stop_answering(callback: CallbackQuery, state: FSMContext):
     await callback.answer("⛔ Ви завершили сеанс відповідей.")
     await callback.message.edit_text("✅ Сеанс завершено.")
 
-# ===== ОБРОБКА КНОПОК ВІДПОВІДІ / ПРОПУСКУ / ВИДАЛЕННЯ =====
-@router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
-async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
-    admin_id = callback.from_user.id
-    action, user_id_str, question_id = callback.data.split(":")
-    user_id = int(user_id_str)
-
-    # Перевірка доступу
-    admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
-    if not admin_check.data:
-        await callback.answer("⚠️ У вас немає доступу.")
-        return
-
-    # Отримуємо питання
-    question = supabase.table("questions").select("*") \
-        .eq("question_id", question_id).eq("user_id", user_id).execute()
-
-    if not question.data:
-        await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
-        return
-
-    q_data = question.data[0]
-    question_text = q_data["question_text"]
-    user_name = q_data.get("username", "Користувач")
-
-    if action == "answer":
-        await callback.message.answer(
-            f"Введіть відповідь для <a href='tg://user?id={user_id}'>{html.escape(user_name)}</a>:\n\n"
-            f"{html.escape(question_text)}",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(AdminAnswer.awaiting_answer)
-        await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
-        await callback.answer()
-        return
-
-    elif action == "skip":
-        supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
-        await callback.answer("⏭ Пропущено")
-        await send_next_question(admin_id)
-
-    elif action == "delete":
-        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-        await callback.answer("🗑 Видалено")
-        await send_next_question(admin_id)
-
-# ===== ОБРОБКА ВІДПОВІДІ =====
-@router.message(AdminAnswer.awaiting_answer)
-async def process_answer(message: Message, state: FSMContext):
-    admin_id = message.from_user.id
-    answer_text = message.text.strip()
-
-    if answer_text == "⬅️ Скасувати":
-        await message.answer("✅ Відповідь скасовано.", reply_markup=ReplyKeyboardRemove())
-        await state.clear()
-        await send_next_question(admin_id)
-        return
-
-    if not answer_text:
-        await message.answer("⚠️ Відповідь не може бути порожньою.")
-        return
-
-    data = await state.get_data()
-    user_id = data["user_id"]
-    question_id = data["question_id"]
-    question_text = data["question_text"]
-
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
-            parse_mode="HTML"
-        )
-    except TelegramForbiddenError:
-        await message.answer("⚠️ Користувач заблокував бота.")
-
-    supabase.table("questions").update({
-        "status": "answered",
-        "answered_at": datetime.utcnow().isoformat(),
-        "admin_id": admin_id,
-        "answer_text": answer_text
-    }).eq("question_id", question_id).eq("user_id", user_id).execute()
-
-    await message.answer(
-        "✅ Відповідь надіслано.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    # Показуємо кнопки продовження / зупинки
-    cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering")],
-        [InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
-    ])
-    await message.answer("Виберіть дію:", reply_markup=cont_buttons)
-    await state.clear()
 
 # ===== ВІДПРАВКА НАСТУПНОГО ПИТАННЯ =====
 async def send_next_question(admin_id: int):
@@ -747,7 +667,6 @@ async def send_next_question(admin_id: int):
         return
 
     next_q = pending_qs.data[0]
-    position = total  # поточне питання завжди буде "1/total"
     clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('username', 'Користувач'))}</a>"
     text = (
         f"📩 Питання від {clickable_name} (1/{total}):\n"
@@ -763,7 +682,9 @@ async def send_next_question(admin_id: int):
     ])
     await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
 
-        
+
+
+  
 # 🟢 Обробка вибору категорії
 @router.message(Form.category)
 async def handle_category_selection(message: Message, state: FSMContext):
