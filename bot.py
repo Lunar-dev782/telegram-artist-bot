@@ -531,7 +531,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⚠️ У вас немає доступу.")
         return
 
-    # Якщо адмін уже в процесі відповіді — не брати нове питання
+    # Якщо адмін уже в процесі відповіді
     current_state = await state.get_state()
     if current_state == "awaiting_answer" and action == "answer":
         await callback.answer("Ви вже відповідаєте на інше питання.")
@@ -539,7 +539,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
     # Отримуємо питання
     question = supabase.table("questions").select("*") \
-        .eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
+        .eq("question_id", question_id).eq("user_id", user_id).execute()
 
     if not question.data:
         await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
@@ -564,7 +564,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await state.set_state("awaiting_answer")
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
         await callback.answer()
-        return  # 🛑 Не показуємо наступні питання
+        return  # 🛑 не показуємо наступне питання автоматично
 
     elif action == "skip":
         await callback.message.edit_text("ℹ️ Питання пропущено.")
@@ -575,13 +575,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-    # Після skip/delete показуємо наступне питання
-    pending = supabase.table("questions").select("*").eq("status", "pending").order("created_at").limit(1).execute()
-    if pending.data:
-        next_q = pending.data[0]
+    # Показуємо наступне питання з нумерацією
+    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("created_at").execute()
+    total = len(pending_qs.data)
+    if total > 0:
+        next_q = pending_qs.data[0]
         clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
         text = (
-            f"📩 Питання від {clickable_name}:\n"
+            f"📩 Питання від {clickable_name} (1/{total}):\n"
             f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
             f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
         )
@@ -599,20 +600,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await bot.send_message(admin_id, "✅ Нових питань немає.")
 
 
-        
 # 🟢 Обробка відповіді адміна
-@router.message(StateFilter("awaiting_answer"))
+@router.message(StateFilter("awaiting_answer")))
 async def process_answer(message: Message, state: FSMContext):
     admin_id = message.from_user.id
     answer_text = message.text.strip()
-    logging.info(f"Адмін {admin_id} надіслав відповідь: {answer_text}")
 
     if answer_text == "⬅️ Скасувати":
-        await message.answer(
-            "✅ Введення відповіді скасовано.",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await message.answer("✅ Введення відповіді скасовано.", reply_markup=ReplyKeyboardRemove())
         await state.clear()
         return
 
@@ -620,70 +615,67 @@ async def process_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Текст відповіді не може бути порожнім.")
         return
 
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
+    question_text = data.get("question_text")
+
+    # Відправка відповіді користувачу
     try:
-        data = await state.get_data()
-        user_id = data.get("user_id")
-        question_id = data.get("question_id")
-        question_text = data.get("question_text")
-
-        if not user_id or not question_id:
-            logging.error(f"Немає даних у стані для admin_id={admin_id}: {data}")
-            await message.answer("⚠️ Помилка: дані питання відсутні.")
-            await state.clear()
-            return
-
-        admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
-        if not admin_check.data:
-            logging.warning(f"Користувач {admin_id} не є адміном")
-            await message.answer("⚠️ У вас немає доступу до цієї дії.")
-            await state.clear()
-            return
-
-        question = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).eq("status", "pending").execute()
-        if not question.data:
-            logging.warning(f"Питання не знайдено або вже оброблено: question_id={question_id}, user_id={user_id}")
-            await message.answer("⚠️ Питання не знайдено або вже оброблено.")
-            await state.clear()
-            return
-
-        try:
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{question_text}\n\n<b>Відповідь:</b> {answer_text}",
-                parse_mode="HTML"
-            )
-            logging.info(f"Відповідь успішно надіслано користувачу {user_id}")
-        except TelegramForbiddenError as e:
-            logging.error(f"Помилка TelegramForbiddenError при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer("⚠️ Не вдалося надіслати відповідь (користувач заблокував бота). Питання буде видалено.")
-        except TelegramBadRequest as e:
-            logging.error(f"Помилка TelegramBadRequest при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer("⚠️ Некоректний формат повідомлення.")
-            await state.clear()
-            return
-        except Exception as e:
-            logging.error(f"Невідома помилка при надсиланні відповіді user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer("⚠️ Помилка при надсиланні відповіді.")
-            await state.clear()
-            return
-
-        try:
-            result = supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-            logging.info(f"Результат видалення питання: question_id={question_id}, user_id={user_id}, результат: {result.data}")
-            if not result.data:
-                logging.warning(f"Не вдалося видалити питання: question_id={question_id}, user_id={user_id}, порожній результат")
-                await message.answer("⚠️ Відповідь надіслано, але не вдалося видалити питання з бази даних.")
-            else:
-                await message.answer("✅ Відповідь надіслано користувачу, питання успішно видалено з бази даних!")
-        except Exception as e:
-            logging.error(f"Помилка Supabase при видаленні питання question_id={question_id}, user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
-            await message.answer(f"⚠️ Відповідь надіслано, але виникла помилка при видаленні питання: {str(e)}")
-        await state.clear()
-
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{question_text}\n\n<b>Відповідь:</b> {answer_text}",
+            parse_mode="HTML"
+        )
+    except TelegramForbiddenError:
+        await message.answer("⚠️ Користувач заблокував бота.")
     except Exception as e:
-        logging.error(f"Загальна помилка при обробці відповіді від admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
-        await message.answer("⚠️ Помилка при обробці відповіді. Спробуйте ще раз.")
+        await message.answer(f"⚠️ Помилка при надсиланні: {e}")
         await state.clear()
+        return
+
+    # Видалення питання
+    supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
+
+    # Кнопки продовження
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Продовжити", callback_data="continue_questions")],
+        [InlineKeyboardButton(text="⏹ Зупинитись", callback_data="stop_questions")]
+    ])
+    await message.answer("✅ Відповідь надіслано.\nЩо робимо далі?", reply_markup=kb)
+    await state.clear()
+
+
+# 🟢 Обробка кнопок після відповіді
+@router.callback_query(lambda c: c.data in ("continue_questions", "stop_questions"))
+async def handle_continue_stop(callback: CallbackQuery, state: FSMContext):
+    if callback.data == "continue_questions":
+        pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("created_at").execute()
+        total = len(pending_qs.data)
+        if total > 0:
+            next_q = pending_qs.data[0]
+            clickable_name = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('user_name', 'Користувач'))}</a>"
+            text = (
+                f"📩 Питання від {clickable_name} (1/{total}):\n"
+                f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+                f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
+            )
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+                    InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+                ],
+                [
+                    InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
+                ]
+            ])
+            await bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=buttons)
+        else:
+            await bot.send_message(callback.from_user.id, "✅ Нових питань немає.")
+    else:
+        await callback.message.edit_text("⏹ Ви зупинили перегляд питань.")
+    await callback.answer()
+
 
 
 # 🟢 Обробка вибору категорії
