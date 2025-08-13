@@ -509,7 +509,7 @@ async def handle_invalid_main_menu(message: Message, state: FSMContext):
     )
     await state.set_state(Form.main_menu)
 
-# ===== СТАНИ ===== 
+# ===== СТАНИ =====
 class AdminAnswer(StatesGroup):
     awaiting_answer = State()
 
@@ -552,7 +552,10 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(
             f"Введіть відповідь для {clickable_user}:\n\n{html.escape(question_text)}",
             parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ Скасувати")]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Скасувати")]],
+                resize_keyboard=True
+            )
         )
         await state.set_state(AdminAnswer.awaiting_answer)
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
@@ -560,8 +563,9 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         return
 
     elif action == "skip":
+        # Оновлюємо статус, щоб уникнути повтору
         try:
-            supabase.table("questions").update({"status": "pending"}).eq("question_id", question_id).eq("user_id", user_id).execute()
+            supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
         except Exception as e:
             await callback.answer(f"⚠️ Помилка при пропуску: {e}")
             return
@@ -600,8 +604,6 @@ async def process_answer(message: Message, state: FSMContext):
     question_id = data["question_id"]
     question_text = data["question_text"]
 
-    clickable_user = f"<a href='tg://user?id={user_id}'>користувач</a>"
-
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -628,8 +630,10 @@ async def process_answer(message: Message, state: FSMContext):
     await message.answer("✅ Відповідь надіслано.", reply_markup=ReplyKeyboardRemove())
 
     cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering")],
-        [InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
+        [
+            InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering"),
+            InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
+        ]
     ])
     await message.answer("Виберіть дію:", reply_markup=cont_buttons)
     await state.clear()
@@ -648,9 +652,15 @@ async def stop_answering(callback: CallbackQuery, state: FSMContext):
 
 # ===== ВІДПРАВКА НАСТУПНОГО ПИТАННЯ =====
 async def send_next_question(admin_id: int):
-    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
+    pending_qs = supabase.table("questions").select("*").in_("status", ["pending", "skipped"]).order("submitted_at").execute()
     if not pending_qs.data:
-        await bot.send_message(admin_id, "✅ Нових питань немає.")
+        cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➡️ Почати спочатку", callback_data="restart_answering"),
+                InlineKeyboardButton(text="⛔ Завершити сеанс", callback_data="stop_answering")
+            ]
+        ])
+        await bot.send_message(admin_id, "✅ Нових питань немає.", reply_markup=cont_buttons)
         return
 
     next_q = pending_qs.data[0]
@@ -668,9 +678,22 @@ async def send_next_question(admin_id: int):
             InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
             InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
         ],
-        [InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")]
+        [
+            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}"),
+            InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
+        ]
     ])
     await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
+
+# ===== ПЕРЕЗАПУСК СЕАНСУ =====
+@router.callback_query(F.data == "restart_answering")
+async def restart_answering(callback: CallbackQuery):
+    await callback.answer("🔄 Сеанс розпочато заново.")
+    await send_next_question(callback.from_user.id)
+
+
+
+
   
 # 🟢 Обробка вибору категорії
 @router.message(Form.category)
