@@ -601,7 +601,7 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
 
 
 # 🟢 Обробка відповіді адміна
-@router.message(StateFilter("awaiting_answer")))
+@router.message(StateFilter("awaiting_answer"))
 async def process_answer(message: Message, state: FSMContext):
     admin_id = message.from_user.id
     answer_text = message.text.strip()
