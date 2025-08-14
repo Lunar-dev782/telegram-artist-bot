@@ -303,6 +303,28 @@ async def handle_other_questions(message: Message, state: FSMContext):
     await state.set_state(Form.question)
 
 
+
+# 🟢 Обробник невідомих команд
+@router.message(F.text.startswith("/"))
+async def handle_unknown_command(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    command = message.text.split()[0].lstrip("/").lower()
+    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
+    
+    await message.answer(
+        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
+
+
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
 async def process_question(message: Message, state: FSMContext):
@@ -406,87 +428,63 @@ async def is_admin(admin_id: int) -> bool:
     result = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     return bool(result.data)
 
-# ===== УНІВЕРСАЛЬНИЙ ХЕНДЛЕР КОМАНД =====
-@router.message(Command(commands=["start", "rules", "help", "питання", "код"]))
+# ===== УНІВЕРСАЛЬНИЙ ОБРОБНИК КОМАНД =====
+@router.message(lambda message: message.text.split()[0].lstrip("/").lower() in ["start", "rules", "help", "питання", "код"])
 async def handle_commands(message: Message, state: FSMContext):
     user_id = message.from_user.id
     command = message.text.split()[0].lstrip("/").lower()
-    logging.info(f"Обробка команди /{command} від user_id={user_id}")
+    await state.clear()
 
     try:
-        if command == "start":
-            await show_main_menu(message, state)
-
-        elif command == "rules":
-            await cmd_rules(message, state)
-
-        elif command == "help":
-            await cmd_help(message, state)
-
-        elif command == "питання":
-            logging.info(f"Користувач {user_id} викликав команду /питання")
-            if not await is_admin(user_id):
-                logging.warning(f"Користувач {user_id} не має прав адміна")
-                await message.answer("⚠️ У вас немає доступу до цієї команди. Спочатку авторизуйтесь за допомогою /код.")
-                return
-            logging.info(f"Користувач {user_id} є адміном, викликаємо send_next_question")
-            await send_next_question(user_id)
-
-        elif command == "код":
-            parts = message.text.split(maxsplit=1)
-            if len(parts) < 2:
-                await message.answer("⚠️ Введіть код. Використовуйте: /код <код>")
-                return
-
-            code = parts[1].strip()
-            if code != "12345":
-                await message.answer("⚠️ Невірний код. Спробуйте ще раз.")
-                return
-
-            existing_admin = supabase.table("admins").select("admin_id").eq("admin_id", user_id).execute()
-            if existing_admin.data:
-                await message.answer("✅ Ви вже авторизовані.")
-                return
-
-            admin_data = {"admin_id": user_id, "added_at": datetime.utcnow().isoformat()}
-            result = supabase.table("admins").insert(admin_data).execute()
-            if not result.data:
-                raise ValueError("Не вдалося додати адміна до бази даних")
-
-            await message.answer("✅ Ви успішно авторизовані як адмін! Використовуйте /питання для перегляду питань.")
-
+        match command:
+            case "start":
+                await show_main_menu(message, state)
+            case "rules":
+                await cmd_rules(message, state)
+            case "help":
+                await cmd_help(message, state)
+            case "питання":
+                await handle_question_command(message, state, user_id)
+            case "код":
+                await handle_code_command(message, user_id)
     except Exception as e:
-        logging.error(f"Помилка при обробці команди /{command} для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Виникла помилка при обробці команди. Спробуйте ще раз або зверніться до <code>@AdminUsername</code>.",
+            "⚠️ Помилка при обробці команди. Зверніться до <code>@AdminUsername</code>.",
             parse_mode="HTML"
         )
 
-# ===== ОБРОБНИК НЕВІДОМИХ КОМАНД =====
-@router.message(F.text.startswith("/"))
-async def handle_unknown_command(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    command = message.text.split()[0].lstrip("/").lower()
-    known_commands = ["start", "rules", "help", "питання", "код"]
-    
-    if command in known_commands:
-        logging.info(f"Команда /{command} від user_id={user_id} вже обробляється в handle_commands, пропускаємо")
-        return  # Пропускаємо, якщо команда відома
+async def handle_question_command(message: Message, state: FSMContext, user_id: int):
+    if not await is_admin(user_id):
+        await message.answer("⚠️ У вас немає доступу до цієї команди.")
+        return
 
-    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
-    await message.answer(
-        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.main_menu)
-        
+    questions = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
+    if not questions.data:
+        await message.answer("ℹ️ Немає нових питань.")
+        return
+
+    await send_question_message(message, questions.data, 0)
+
+async def handle_code_command(message: Message, user_id: int):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("⚠️ Введіть код: /код <код>")
+        return
+
+    if parts[1].strip() != "12345":
+        await message.answer("⚠️ Невірний код.")
+        return
+
+    if await is_admin(user_id):
+        await message.answer("✅ Ви вже авторизовані.")
+        return
+
+    admin_data = {"admin_id": user_id, "added_at": datetime.utcnow().isoformat()}
+    result = supabase.table("admins").insert(admin_data).execute()
+    if not result.data:
+        raise ValueError("Не вдалося додати адміна до бази даних")
+
+    await message.answer("✅ Ви авторизовані як адмін! Використовуйте /питання.")
 
 # ===== НАСТУПНЕ ПИТАННЯ =====
 async def send_next_question(admin_id: int):
