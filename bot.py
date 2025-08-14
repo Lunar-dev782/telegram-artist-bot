@@ -368,25 +368,7 @@ async def process_question(message: Message, state: FSMContext):
         await state.set_state(Form.main_menu)
 
 
-# 🟢 Обробник невідомих команд
-@router.message(F.text.startswith("/"))
-async def handle_unknown_command(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    command = message.text.split()[0].lstrip("/").lower()
-    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
-    
-    await message.answer(
-        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.main_menu)
+
 
 # 🟢 Обробка головного меню (некоректні дії)
 @router.message(Form.main_menu)
@@ -431,8 +413,6 @@ async def handle_commands(message: Message, state: FSMContext):
     command = message.text.split()[0].lstrip("/").lower()
     logging.info(f"Обробка команди /{command} від user_id={user_id}")
 
-    await state.clear()
-
     try:
         if command == "start":
             await show_main_menu(message, state)
@@ -444,8 +424,9 @@ async def handle_commands(message: Message, state: FSMContext):
             await cmd_help(message, state)
 
         elif command == "питання":
+            logging.info(f"Користувач {user_id} викликав команду /питання")
             if not await is_admin(user_id):
-                logging.warning(f"Користувач {user_id} не має прав адміна для команди /питання")
+                logging.warning(f"Користувач {user_id} не має прав адміна")
                 await message.answer("⚠️ У вас немає доступу до цієї команди. Спочатку авторизуйтесь за допомогою /код.")
                 return
             logging.info(f"Користувач {user_id} є адміном, викликаємо send_next_question")
@@ -480,6 +461,32 @@ async def handle_commands(message: Message, state: FSMContext):
             "⚠️ Виникла помилка при обробці команди. Спробуйте ще раз або зверніться до <code>@AdminUsername</code>.",
             parse_mode="HTML"
         )
+
+# ===== ОБРОБНИК НЕВІДОМИХ КОМАНД =====
+@router.message(F.text.startswith("/"))
+async def handle_unknown_command(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    command = message.text.split()[0].lstrip("/").lower()
+    known_commands = ["start", "rules", "help", "питання", "код"]
+    
+    if command in known_commands:
+        logging.info(f"Команда /{command} від user_id={user_id} вже обробляється в handle_commands, пропускаємо")
+        return  # Пропускаємо, якщо команда відома
+
+    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
+    await message.answer(
+        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
+        
 
 # ===== НАСТУПНЕ ПИТАННЯ =====
 async def send_next_question(admin_id: int):
