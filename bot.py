@@ -372,95 +372,91 @@ async def process_question(message: Message, state: FSMContext):
 async def handle_commands(message: Message, state: FSMContext):
     user_id = message.from_user.id
     command = message.text.split()[0].lstrip("/").lower()
-    logging.info(f"DEBAG: Початок обробки команди /{command} для user_id={user_id}, повний текст: {message.text}")
 
-    # Очищаємо стан для уникнення конфліктів
-    await state.clear()
-    logging.info(f"DEBAG: Стан очищено для user_id={user_id}")
+    await state.clear()  # Очистка стану
 
     try:
         if command == "start":
-            logging.info(f"DEBAG: Виконується команда /start для user_id={user_id}")
             await show_main_menu(message, state)
+
         elif command == "rules":
-            logging.info(f"DEBAG: Виконується команда /rules для user_id={user_id}")
             await cmd_rules(message, state)
+
         elif command == "help":
-            logging.info(f"DEBAG: Виконується команда /help для user_id={user_id}")
             await cmd_help(message, state)
+
         elif command == "питання":
-            logging.info(f"DEBAG: Адмін {user_id} використав команду /питання")
+            # Перевірка доступу
             admin_check = supabase.table("admins").select("admin_id").eq("admin_id", user_id).execute()
             if not admin_check.data:
-                logging.warning(f"Користувач {user_id} не є адміном")
                 await message.answer("⚠️ У вас немає доступу до цієї команди.")
                 return
 
-            question = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at", desc=False).limit(1).execute()
-            logging.info(f"DEBAG: Результат запиту до questions для admin_id={user_id}: {question.data}")
-            if not question.data:
+            # Беремо перше питання зі статусом pending
+            questions_res = supabase.table("questions").select("*") \
+                .eq("status", "pending").order("submitted_at", desc=False).execute()
+
+            if not questions_res.data:
                 await message.answer("ℹ️ Наразі немає нових питань.")
                 return
 
-            question_data = question.data[0]
-            user_id_question = question_data["user_id"]
-            question_id = question_data["question_id"]
-            username = question_data["username"]
-            question_text = question_data["question_text"]
+            total = len(questions_res.data)
+            q_data = questions_res.data[0]
+            q_user_id = q_data["user_id"]
+            q_username = q_data.get("username", "Користувач")
+            q_text = q_data["question_text"]
+            q_id = q_data["question_id"]
 
+            clickable_name = f"<a href='tg://user?id={q_user_id}'>{html.escape(q_username)}</a>"
+
+            # Формуємо повідомлення у новому стилі
             message_text = (
-                f"❓ Питання від <b>{username}</b> (ID: {user_id_question}):\n\n"
-                f"{question_text}"
+                f"📩 Питання від {clickable_name} (1/{total}):\n\n"
+                f"<b>Текст питання:</b>\n{html.escape(q_text)}"
             )
-            keyboard = InlineKeyboardBuilder()
-            keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id_question}:{question_id}")
-            keyboard.button(text="⏭️ Пропустити", callback_data=f"skip:{user_id_question}:{question_id}")
-            keyboard.button(text="🗑️ Видалити", callback_data=f"delete:{user_id_question}:{question_id}")
-            markup = keyboard.as_markup()
 
-            await message.answer(
-                message_text,
-                parse_mode="HTML",
-                reply_markup=markup
-            )
+            # Кнопки дій
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{q_user_id}:{q_id}"),
+                    InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{q_user_id}:{q_id}")
+                ],
+                [
+                    InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{q_user_id}:{q_id}"),
+                    InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
+                ]
+            ])
+
+            await message.answer(message_text, parse_mode="HTML", reply_markup=buttons)
+
         elif command == "код":
-            logging.info(f"DEBAG: Адмін {user_id} ввів команду /код: {message.text}")
             parts = message.text.split(maxsplit=1)
             if len(parts) < 2:
                 await message.answer("⚠️ Введіть код. Використовуйте: /код <код>")
                 return
 
             code = parts[1].strip()
-            logging.info(f"DEBAG: Введено код {code} для user_id={user_id}")
             if code != "12345":
-                logging.warning(f"Невірний код від admin_id={user_id}: {code}")
                 await message.answer("⚠️ Невірний код. Спробуйте ще раз.")
                 return
 
             existing_admin = supabase.table("admins").select("admin_id").eq("admin_id", user_id).execute()
-            logging.info(f"DEBAG: Перевірка наявності адміна для user_id={user_id}: {existing_admin.data}")
             if existing_admin.data:
                 await message.answer("✅ Ви вже авторизовані.")
                 return
 
-            admin_data = {
-                "admin_id": user_id,
-                "added_at": datetime.utcnow().isoformat()
-            }
+            admin_data = {"admin_id": user_id, "added_at": datetime.utcnow().isoformat()}
             result = supabase.table("admins").insert(admin_data).execute()
-            logging.info(f"DEBAG: Адмін {user_id} доданий до таблиці admins: {result.data}")
             if not result.data:
                 raise ValueError("Не вдалося додати адміна до бази даних")
 
             await message.answer("✅ Ви успішно авторизовані як адмін! Використовуйте /питання для перегляду питань.")
+
     except Exception as e:
-        logging.error(f"Помилка при обробці команди /{command} для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
             "⚠️ Виникла помилка при обробці команди. Спробуйте ще раз або зверніться до <code>@AdminUsername</code>.",
             parse_mode="HTML"
         )
-    finally:
-        logging.info(f"DEBAG: Завершення обробки команди /{command} для user_id={user_id}")
 
 # 🟢 Обробник невідомих команд
 @router.message(F.text.startswith("/"))
