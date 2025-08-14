@@ -304,25 +304,21 @@ async def handle_other_questions(message: Message, state: FSMContext):
 
 
 
-# 🟢 Обробник невідомих команд
-@router.message(F.text.startswith("/"))
-async def handle_unknown_command(message: Message, state: FSMContext):
+# 🟢 Обробка "Інші питання"
+@router.message(Form.main_menu, F.text == "❓ Інші питання")
+async def handle_other_questions(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    command = message.text.split()[0].lstrip("/").lower()
-    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
-    
+    logging.info(f"Користувач {user_id} обрав 'Інші питання'")
     await message.answer(
-        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
+        f"❓ <b>Якщо у вас є питання — напишіть його тут, і наші адміни дадуть відповідь протягом доби.</b>\n\n"
+        f"📩 Також можете звернутись напряму:\n<code>{' • '.join(ADMIN_CONTACTS)}</code>",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
-                [KeyboardButton(text="❓ Інші питання")]
-            ],
+            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
             resize_keyboard=True
         )
     )
-    await state.set_state(Form.main_menu)
+    await state.set_state(Form.question)
 
 
 # 🟢 Обробка питань до адмінів
@@ -389,8 +385,120 @@ async def process_question(message: Message, state: FSMContext):
         )
         await state.set_state(Form.main_menu)
 
+# 🟢 Універсальний обробник команд
+@router.message(Command(commands=["start", "rules", "help", "питання", "код"]))
+async def handle_commands(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    command = message.text.split()[0].lstrip("/").lower()
+    logging.info(f"DEBAG: Початок обробки команди /{command} для user_id={user_id}, повний текст: {message.text}")
 
+    # Очищаємо стан для уникнення конфліктів
+    await state.clear()
+    logging.info(f"DEBAG: Стан очищено для user_id={user_id}")
 
+    try:
+        if command == "start":
+            logging.info(f"DEBAG: Виконується команда /start для user_id={user_id}")
+            await show_main_menu(message, state)
+        elif command == "rules":
+            logging.info(f"DEBAG: Виконується команда /rules для user_id={user_id}")
+            await cmd_rules(message, state)
+        elif command == "help":
+            logging.info(f"DEBAG: Виконується команда /help для user_id={user_id}")
+            await cmd_help(message, state)
+        elif command == "питання":
+            logging.info(f"DEBAG: Адмін {user_id} використав команду /питання")
+            admin_check = supabase.table("admins").select("admin_id").eq("admin_id", user_id).execute()
+            if not admin_check.data:
+                logging.warning(f"Користувач {user_id} не є адміном")
+                await message.answer("⚠️ У вас немає доступу до цієї команди.")
+                return
+
+            question = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at", desc=False).limit(1).execute()
+            logging.info(f"DEBAG: Результат запиту до questions для admin_id={user_id}: {question.data}")
+            if not question.data:
+                await message.answer("ℹ️ Наразі немає нових питань.")
+                return
+
+            question_data = question.data[0]
+            user_id_question = question_data["user_id"]
+            question_id = question_data["question_id"]
+            username = question_data["username"]
+            question_text = question_data["question_text"]
+
+            message_text = (
+                f"❓ Питання від <b>{username}</b> (ID: {user_id_question}):\n\n"
+                f"{question_text}"
+            )
+            keyboard = InlineKeyboardBuilder()
+            keyboard.button(text="✉️ Відповісти", callback_data=f"answer:{user_id_question}:{question_id}")
+            keyboard.button(text="⏭️ Пропустити", callback_data=f"skip:{user_id_question}:{question_id}")
+            keyboard.button(text="🗑️ Видалити", callback_data=f"delete:{user_id_question}:{question_id}")
+            markup = keyboard.as_markup()
+
+            await message.answer(
+                message_text,
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+        elif command == "код":
+            logging.info(f"DEBAG: Адмін {user_id} ввів команду /код: {message.text}")
+            parts = message.text.split(maxsplit=1)
+            if len(parts) < 2:
+                await message.answer("⚠️ Введіть код. Використовуйте: /код <код>")
+                return
+
+            code = parts[1].strip()
+            logging.info(f"DEBAG: Введено код {code} для user_id={user_id}")
+            if code != "12345":
+                logging.warning(f"Невірний код від admin_id={user_id}: {code}")
+                await message.answer("⚠️ Невірний код. Спробуйте ще раз.")
+                return
+
+            existing_admin = supabase.table("admins").select("admin_id").eq("admin_id", user_id).execute()
+            logging.info(f"DEBAG: Перевірка наявності адміна для user_id={user_id}: {existing_admin.data}")
+            if existing_admin.data:
+                await message.answer("✅ Ви вже авторизовані.")
+                return
+
+            admin_data = {
+                "admin_id": user_id,
+                "added_at": datetime.utcnow().isoformat()
+            }
+            result = supabase.table("admins").insert(admin_data).execute()
+            logging.info(f"DEBAG: Адмін {user_id} доданий до таблиці admins: {result.data}")
+            if not result.data:
+                raise ValueError("Не вдалося додати адміна до бази даних")
+
+            await message.answer("✅ Ви успішно авторизовані як адмін! Використовуйте /питання для перегляду питань.")
+    except Exception as e:
+        logging.error(f"Помилка при обробці команди /{command} для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        await message.answer(
+            "⚠️ Виникла помилка при обробці команди. Спробуйте ще раз або зверніться до <code>@AdminUsername</code>.",
+            parse_mode="HTML"
+        )
+    finally:
+        logging.info(f"DEBAG: Завершення обробки команди /{command} для user_id={user_id}")
+
+# 🟢 Обробник невідомих команд
+@router.message(F.text.startswith("/"))
+async def handle_unknown_command(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    command = message.text.split()[0].lstrip("/").lower()
+    logging.info(f"DEBAG: Користувач {user_id} ввів невідому команду /{command}")
+    
+    await message.answer(
+        "⚠️ <b>Невідома команда.</b> Використовуйте /start, /rules, /help або оберіть дію з меню.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+                [KeyboardButton(text="❓ Інші питання")]
+            ],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(Form.main_menu)
 
 # 🟢 Обробка головного меню (некоректні дії)
 @router.message(Form.main_menu)
@@ -428,113 +536,12 @@ async def is_admin(admin_id: int) -> bool:
     result = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     return bool(result.data)
 
-# ===== УНІВЕРСАЛЬНИЙ ОБРОБНИК КОМАНД =====
-@router.message(lambda message: message.text.split()[0].lstrip("/").lower() in ["start", "rules", "help", "питання", "код"])
-async def handle_commands(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    command = message.text.split()[0].lstrip("/").lower()
-    await state.clear()
-
-    try:
-        match command:
-            case "start":
-                await show_main_menu(message, state)
-            case "rules":
-                await cmd_rules(message, state)
-            case "help":
-                await cmd_help(message, state)
-            case "питання":
-                await handle_question_command(message, state, user_id)
-            case "код":
-                await handle_code_command(message, user_id)
-    except Exception as e:
-        await message.answer(
-            "⚠️ Помилка при обробці команди. Зверніться до <code>@AdminUsername</code>.",
-            parse_mode="HTML"
-        )
-
-async def handle_question_command(message: Message, state: FSMContext, user_id: int):
-    if not await is_admin(user_id):
-        await message.answer("⚠️ У вас немає доступу до цієї команди.")
-        return
-
-    questions = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
-    if not questions.data:
-        await message.answer("ℹ️ Немає нових питань.")
-        return
-
-    await send_question_message(message, questions.data, 0)
-
-async def handle_code_command(message: Message, user_id: int):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("⚠️ Введіть код: /код <код>")
-        return
-
-    if parts[1].strip() != "12345":
-        await message.answer("⚠️ Невірний код.")
-        return
-
-    if await is_admin(user_id):
-        await message.answer("✅ Ви вже авторизовані.")
-        return
-
-    admin_data = {"admin_id": user_id, "added_at": datetime.utcnow().isoformat()}
-    result = supabase.table("admins").insert(admin_data).execute()
-    if not result.data:
-        raise ValueError("Не вдалося додати адміна до бази даних")
-
-    await message.answer("✅ Ви авторизовані як адмін! Використовуйте /питання.")
-
-# ===== НАСТУПНЕ ПИТАННЯ =====
-async def send_next_question(admin_id: int):
-    try:
-        logging.info(f"Запит питань зі статусами 'pending' або 'skipped' для admin_id={admin_id}")
-        pending_qs = supabase.table("questions").select("*").in_("status", ["pending", "skipped"]).order("submitted_at").execute()
-        logging.info(f"Отримано {len(pending_qs.data)} питань: {pending_qs.data}")
-
-        if not pending_qs.data:
-            cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="➡️ Почати спочатку", callback_data="restart_answering"),
-                    InlineKeyboardButton(text="⛔ Завершити сеанс", callback_data="stop_answering")
-                ]
-            ])
-            await bot.send_message(admin_id, "✅ Нових питань немає.", parse_mode="HTML", reply_markup=cont_buttons)
-            return
-
-        next_q = pending_qs.data[0]
-        total = len(pending_qs.data)
-        user_name = next_q.get('username', 'Користувач')
-        clickable_user = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(user_name)}</a>"
-
-        text = (
-            f"📩 Питання від {clickable_user} (1/{total}):\n"
-            f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
-            f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
-        )
-        buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-                InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
-            ],
-            [
-                InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}"),
-                InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
-            ]
-        ])
-        await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
-    except Exception as e:
-        logging.error(f"Помилка в send_next_question для admin_id={admin_id}: {str(e)}\n{traceback.format_exc()}")
-        await bot.send_message(admin_id, f"⚠️ Помилка при отриманні питань: {str(e)}. Зверніться до <code>@AdminUsername</code>.", parse_mode="HTML")
-
 # ===== ОБРОБКА КНОПОК (ВІДПОВІДЬ / ПРОПУСК / ВИДАЛЕННЯ) =====
 @router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
     if len(parts) != 3:
-        logging.error(f"Некоректний формат callback_data: {callback.data}")
         await callback.answer("⚠️ Некоректний формат даних.")
         return
 
@@ -542,25 +549,15 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     try:
         user_id = int(user_id_str)
     except ValueError:
-        logging.error(f"Некоректний user_id у callback_data: {user_id_str}")
         await callback.answer("⚠️ Некоректний user_id.")
         return
 
     if not await is_admin(admin_id):
-        logging.warning(f"Користувач {admin_id} не є адміном")
         await callback.answer("⚠️ У вас немає доступу.")
         return
 
-    try:
-        question_res = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
-        logging.info(f"Результат запиту питання: {question_res.data}")
-    except Exception as e:
-        logging.error(f"Помилка при запиті питання з Supabase: {str(e)}\n{traceback.format_exc()}")
-        await callback.answer("⚠️ Помилка при отриманні питання.")
-        return
-
+    question_res = supabase.table("questions").select("*").eq("question_id", question_id).eq("user_id", user_id).execute()
     if not question_res.data:
-        logging.warning(f"Питання не знайдено: question_id={question_id}, user_id={user_id}")
         await callback.answer("⚠️ Питання не знайдено або вже оброблено.")
         return
 
@@ -584,12 +581,11 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         return
 
     elif action == "skip":
+        # Оновлюємо статус, щоб уникнути повтору
         try:
             supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
-            logging.info(f"Питання пропущено: question_id={question_id}, user_id={user_id}")
         except Exception as e:
-            logging.error(f"Помилка при пропуску питання: {str(e)}\n{traceback.format_exc()}")
-            await callback.answer(f"⚠️ Помилка при пропуску: {str(e)}")
+            await callback.answer(f"⚠️ Помилка при пропуску: {e}")
             return
         await callback.answer("⏭ Питання пропущено.")
         await send_next_question(admin_id)
@@ -598,16 +594,14 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     elif action == "delete":
         try:
             supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
-            logging.info(f"Питання видалено: question_id={question_id}, user_id={user_id}")
         except Exception as e:
-            logging.error(f"Помилка при видаленні питання: {str(e)}\n{traceback.format_exc()}")
-            await callback.answer(f"⚠️ Помилка при видаленні: {str(e)}")
+            await callback.answer(f"⚠️ Помилка при видаленні: {e}")
             return
         await callback.answer("🗑 Питання видалено.")
         await send_next_question(admin_id)
         return
 
-# ===== ОБРОБКА ВІДПОВІДІ =====
+# ===== ОБРОБКА ВІДПОВІДІ АДМІНА =====
 @router.message(AdminAnswer.awaiting_answer)
 async def process_answer(message: Message, state: FSMContext):
     admin_id = message.from_user.id
@@ -628,29 +622,41 @@ async def process_answer(message: Message, state: FSMContext):
     question_id = data["question_id"]
     question_text = data["question_text"]
 
-    await bot.send_message(
-        chat_id=user_id,
-        text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
-        parse_mode="HTML"
-    )
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await message.answer(f"⚠️ Неможливо надіслати повідомлення: {e}")
+        await state.clear()
+        return
 
-    supabase.table("questions").update({
-        "status": "answered",
-        "answered_at": datetime.utcnow().isoformat(),
-        "admin_id": admin_id,
-        "answer_text": answer_text
-    }).eq("question_id", question_id).eq("user_id", user_id).execute()
+    try:
+        supabase.table("questions").update({
+            "status": "answered",
+            "answered_at": datetime.utcnow().isoformat(),
+            "admin_id": admin_id,
+            "answer_text": answer_text
+        }).eq("question_id", question_id).eq("user_id", user_id).execute()
+    except Exception as e:
+        await message.answer(f"⚠️ Помилка при оновленні в БД: {e}")
+        await state.clear()
+        return
 
     await message.answer("✅ Відповідь надіслано.", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Виберіть дію:", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering"),
-             InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
+
+    cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➡️ Продовжити", callback_data="continue_answering"),
+            InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
         ]
-    ))
+    ])
+    await message.answer("Виберіть дію:", reply_markup=cont_buttons)
     await state.clear()
 
-# ===== ПРОДОВЖЕННЯ / ЗУПИНКА =====
+# ===== ПРОДОВЖЕННЯ / ЗУПИНКА СЕАНСУ =====
 @router.callback_query(F.data == "continue_answering")
 async def continue_answering(callback: CallbackQuery):
     await callback.answer()
@@ -662,39 +668,47 @@ async def stop_answering(callback: CallbackQuery, state: FSMContext):
     await callback.answer("⛔ Ви завершили сеанс відповідей.")
     await callback.message.edit_text("✅ Сеанс завершено.")
 
-# ===== НАСТУПНЕ ПИТАННЯ =====
+# ===== ВІДПРАВКА НАСТУПНОГО ПИТАННЯ =====
 async def send_next_question(admin_id: int):
-    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
+    pending_qs = supabase.table("questions").select("*").in_("status", ["pending", "skipped"]).order("submitted_at").execute()
     if not pending_qs.data:
-        await bot.send_message(admin_id, "✅ Нових питань немає.", reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="➡️ Почати спочатку", callback_data="restart_answering"),
-                 InlineKeyboardButton(text="⛔ Завершити сеанс", callback_data="stop_answering")]
+        cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➡️ Почати спочатку", callback_data="restart_answering"),
+                InlineKeyboardButton(text="⛔ Завершити сеанс", callback_data="stop_answering")
             ]
-        ))
+        ])
+        await bot.send_message(admin_id, "✅ Нових питань немає.", reply_markup=cont_buttons)
         return
 
     next_q = pending_qs.data[0]
     total = len(pending_qs.data)
-    clickable_user = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(next_q.get('username', 'Користувач'))}</a>"
+    user_name = next_q.get('username', 'Користувач')
+    clickable_user = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(user_name)}</a>"
 
     text = (
         f"📩 Питання від {clickable_user} (1/{total}):\n"
+        f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
         f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-         InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")],
-        [InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}"),
-         InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")]
+        [
+            InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
+            InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+        ],
+        [
+            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}"),
+            InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
+        ]
     ])
     await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
 
-# ===== ПЕРЕЗАПУСК =====
+# ===== ПЕРЕЗАПУСК СЕАНСУ =====
 @router.callback_query(F.data == "restart_answering")
 async def restart_answering(callback: CallbackQuery):
     await callback.answer("🔄 Сеанс розпочато заново.")
     await send_next_question(callback.from_user.id)
+
 
 
   
