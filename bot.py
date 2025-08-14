@@ -303,24 +303,6 @@ async def handle_other_questions(message: Message, state: FSMContext):
     await state.set_state(Form.question)
 
 
-
-# 🟢 Обробка "Інші питання"
-@router.message(Form.main_menu, F.text == "❓ Інші питання")
-async def handle_other_questions(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} обрав 'Інші питання'")
-    await message.answer(
-        f"❓ <b>Якщо у вас є питання — напишіть його тут, і наші адміни дадуть відповідь протягом доби.</b>\n\n"
-        f"📩 Також можете звернутись напряму:\n<code>{' • '.join(ADMIN_CONTACTS)}</code>",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.question)
-
-
 # 🟢 Обробка питань до адмінів
 @router.message(Form.question)
 async def process_question(message: Message, state: FSMContext):
@@ -708,6 +690,7 @@ async def send_next_question(admin_id: int):
 async def restart_answering(callback: CallbackQuery):
     await callback.answer("🔄 Сеанс розпочато заново.")
     await send_next_question(callback.from_user.id)
+
 
 
 
