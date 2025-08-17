@@ -923,11 +923,6 @@ async def get_images(message: Message, state: FSMContext):
         await submit_without_photos(message, state)
         return
 
-    if message.text == "/done":
-        logging.info(f"Користувач {user_id} завершив надсилання зображень")
-        await done_images(message, state)
-        return
-
     if message.photo:
         data = await state.get_data()
         photos = data.get("photos", [])
@@ -942,7 +937,10 @@ async def get_images(message: Message, state: FSMContext):
                 f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
                 parse_mode="HTML",
                 reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]],
+                    keyboard=[
+                        [KeyboardButton(text="/done")],
+                        [KeyboardButton(text="⬅️ Назад")]
+                    ],
                     resize_keyboard=True
                 )
             )
@@ -959,21 +957,19 @@ async def get_images(message: Message, state: FSMContext):
             )
         )
 
-# ===== ОБРОБКА КОМАНДИ /done =====
-@router.message(Command("done"))
-async def handle_done(message: Message, state: FSMContext):
+# 🟢 Завершення надсилання зображень (/done)
+@router.message(Form.images, Command("done"))
+async def done_images(message: Message, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
+    category = data.get("category", "")
 
     if not photos:
         await message.answer("⚠️ Ви ще не надіслали жодного фото.")
         return
 
-    await message.answer(f"✅ Ви завершили завантаження {len(photos)} фото.")
-    # тут можна обробити фото або зберегти в БД
-    await state.clear()
-
-        
+    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
+    await finish_submission(message.from_user, state, photos)
 
 # 🟢 Надсилання без фото
 @router.message(Form.images, F.text == "Надіслати без фото")
@@ -981,16 +977,6 @@ async def submit_without_photos(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
     await finish_submission(message.from_user, state, photos=[])
-
-# 🟢 Завершення надсилання зображень
-@router.message(Form.images, F.text == "/done")
-async def done_images(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    category = data.get("category", "")
-    logging.info(f"Користувач {message.from_user.id} завершив надсилання зображень: {photos}, категорія: {category}")
-    await finish_submission(message.from_user, state, photos)
-
 
 # 🟢 /help
 @router.message(Command("help"))
