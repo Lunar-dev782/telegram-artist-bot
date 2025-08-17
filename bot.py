@@ -609,20 +609,10 @@ async def process_answer(message: Message, state: FSMContext):
             text=f"✉️ <b>Відповідь на ваше питання:</b>\n\n{html.escape(question_text)}\n\n<b>Відповідь:</b> {html.escape(answer_text)}",
             parse_mode="HTML"
         )
+        # Видаляємо питання з бази даних після надсилання відповіді
+        supabase.table("questions").delete().eq("question_id", question_id).eq("user_id", user_id).execute()
     except Exception as e:
         await message.answer(f"⚠️ Неможливо надіслати повідомлення: {e}")
-        await state.clear()
-        return
-
-    try:
-        supabase.table("questions").update({
-            "status": "answered",
-            "answered_at": datetime.utcnow().isoformat(),
-            "admin_id": admin_id,
-            "answer_text": answer_text
-        }).eq("question_id", question_id).eq("user_id", user_id).execute()
-    except Exception as e:
-        await message.answer(f"⚠️ Помилка при оновленні в БД: {e}")
         await state.clear()
         return
 
