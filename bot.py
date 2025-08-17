@@ -657,6 +657,7 @@ async def send_next_question(admin_id: int):
     user_name = next_q.get('username', 'Користувач')
     clickable_user = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(user_name)}</a>"
 
+    # 🔽 Ось тут формується текст питання:
     text = (
         f"📩 Питання від {clickable_user} (1/{total}):\n\n"
         f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
@@ -678,6 +679,10 @@ async def send_next_question(admin_id: int):
 async def restart_answering(callback: CallbackQuery):
     await callback.answer("🔄 Сеанс розпочато заново.")
     await send_next_question(callback.from_user.id)
+
+
+
+    
   
 # 🟢 Обробка вибору категорії
 @router.message(Form.category)
