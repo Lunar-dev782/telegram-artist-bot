@@ -959,6 +959,22 @@ async def get_images(message: Message, state: FSMContext):
             )
         )
 
+# ===== ОБРОБКА КОМАНДИ /done =====
+@router.message(Command("done"))
+async def handle_done(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+
+    if not photos:
+        await message.answer("⚠️ Ви ще не надіслали жодного фото.")
+        return
+
+    await message.answer(f"✅ Ви завершили завантаження {len(photos)} фото.")
+    # тут можна обробити фото або зберегти в БД
+    await state.clear()
+
+        
+
 # 🟢 Надсилання без фото
 @router.message(Form.images, F.text == "Надіслати без фото")
 async def submit_without_photos(message: Message, state: FSMContext):
