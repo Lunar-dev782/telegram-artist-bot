@@ -462,8 +462,8 @@ async def handle_commands(message: Message, state: FSMContext):
     finally:
         logging.info(f"DEBAG: Завершення обробки команди /{command} для user_id={user_id}")
 
-# 🟢 Обробник невідомих команд
-@router.message(F.text.startswith("/"))
+# 🟢 Обробник невідомих команд тільки в головному меню
+@router.message(StateFilter(Form.main_menu), F.text.startswith("/"))
 async def handle_unknown_command(message: Message, state: FSMContext):
     user_id = message.from_user.id
     command = message.text.split()[0].lstrip("/").lower()
@@ -480,7 +480,9 @@ async def handle_unknown_command(message: Message, state: FSMContext):
             resize_keyboard=True
         )
     )
+    # лишаємо користувача в головному меню
     await state.set_state(Form.main_menu)
+
 
 # 🟢 Обробка головного меню (некоректні дії)
 @router.message(Form.main_menu)
