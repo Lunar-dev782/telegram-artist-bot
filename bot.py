@@ -518,8 +518,8 @@ async def is_admin(admin_id: int) -> bool:
     result = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     return bool(result.data)
 
-# ===== ОБРОБКА КНОПОК (ВІДПОВІДЬ / ПРОПУСК / ВИДАЛЕННЯ) =====
-@router.callback_query(F.data.startswith(("answer:", "skip:", "delete:")))
+# ===== ОБРОБКА КНОПОК (ВІДПОВІДЬ / ВИДАЛЕННЯ) =====
+@router.callback_query(F.data.startswith(("answer:", "delete:")))
 async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
     admin_id = callback.from_user.id
     parts = callback.data.split(":")
@@ -560,17 +560,6 @@ async def handle_question_buttons(callback: CallbackQuery, state: FSMContext):
         await state.set_state(AdminAnswer.awaiting_answer)
         await state.update_data(user_id=user_id, question_id=question_id, question_text=question_text)
         await callback.answer()
-        return
-
-    elif action == "skip":
-        # Оновлюємо статус, щоб уникнути повтору
-        try:
-            supabase.table("questions").update({"status": "skipped"}).eq("question_id", question_id).eq("user_id", user_id).execute()
-        except Exception as e:
-            await callback.answer(f"⚠️ Помилка при пропуску: {e}")
-            return
-        await callback.answer("⏭ Питання пропущено.")
-        await send_next_question(admin_id)
         return
 
     elif action == "delete":
@@ -652,7 +641,7 @@ async def stop_answering(callback: CallbackQuery, state: FSMContext):
 
 # ===== ВІДПРАВКА НАСТУПНОГО ПИТАННЯ =====
 async def send_next_question(admin_id: int):
-    pending_qs = supabase.table("questions").select("*").in_("status", ["pending", "skipped"]).order("submitted_at").execute()
+    pending_qs = supabase.table("questions").select("*").eq("status", "pending").order("submitted_at").execute()
     if not pending_qs.data:
         cont_buttons = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -669,17 +658,15 @@ async def send_next_question(admin_id: int):
     clickable_user = f"<a href='tg://user?id={next_q['user_id']}'>{html.escape(user_name)}</a>"
 
     text = (
-        f"📩 Питання від {clickable_user} (1/{total}):\n"
-        f"<b>ID:</b> <code>{next_q['user_id']}</code>\n\n"
+        f"📩 Питання від {clickable_user} (1/{total}):\n\n"
         f"<b>Текст питання:</b>\n{html.escape(next_q['question_text'])}"
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✏️ Відповісти", callback_data=f"answer:{next_q['user_id']}:{next_q['question_id']}"),
-            InlineKeyboardButton(text="⏭ Пропустити", callback_data=f"skip:{next_q['user_id']}:{next_q['question_id']}")
+            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}")
         ],
         [
-            InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{next_q['user_id']}:{next_q['question_id']}"),
             InlineKeyboardButton(text="⛔ Зупинитись", callback_data="stop_answering")
         ]
     ])
@@ -690,9 +677,6 @@ async def send_next_question(admin_id: int):
 async def restart_answering(callback: CallbackQuery):
     await callback.answer("🔄 Сеанс розпочато заново.")
     await send_next_question(callback.from_user.id)
-
-
-
 
   
 # 🟢 Обробка вибору категорії
