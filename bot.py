@@ -909,54 +909,6 @@ async def get_description_and_socials(message: Message, state: FSMContext):
         )
         await state.set_state(Form.images)
 
-# 🟢 Обробка зображень (крім /done)
-@router.message(StateFilter(Form.images))
-async def get_images(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    logging.info(f"Користувач {user_id} надіслав повідомлення в стані Form.images: {message.text or 'Фото'}")
-
-    if message.text and message.text.strip() == "⬅️ Назад":
-        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
-        await show_main_menu(message, state)
-        return
-
-    if message.text == "Надіслати без фото":
-        logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
-        await submit_without_photos(message, state)
-        return
-
-    if message.photo:  # користувач надіслав фото
-        data = await state.get_data()
-        photos = data.get("photos", [])
-        photos.append(message.photo[-1].file_id)
-        logging.info(f"Користувач {user_id} надіслав зображення: {message.photo[-1].file_id}")
-
-        if len(photos) >= 5:
-            await finish_submission(message.from_user, state, photos)
-        else:
-            await state.update_data(photos=photos)
-            await message.answer(
-                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
-                parse_mode="HTML",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]],
-                    resize_keyboard=True
-                )
-            )
-    else:
-        await message.answer(
-            "⚠️ <b>Будь ласка, надішли зображення або натисни 'Надіслати без фото'.</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="Надіслати без фото")],
-                    [KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
-
-
 # 🟢 Завершення надсилання зображень (/done)
 @router.message(StateFilter(Form.images), Command("done"))
 async def done_images(message: Message, state: FSMContext):
@@ -968,16 +920,71 @@ async def done_images(message: Message, state: FSMContext):
         await message.answer("⚠️ Ви ще не надіслали жодного фото.")
         return
 
-    logging.info(f"Користувач {message.from_user.id} завершив надсилання {len(photos)} фото. Категорія: {category}")
+    logging.info(
+        f"Користувач {message.from_user.id} завершив надсилання {len(photos)} фото. Категорія: {category}"
+    )
     await finish_submission(message.from_user, state, photos)
 
 
 # 🟢 Надсилання без фото
-@router.message(Form.images, F.text == "Надіслати без фото")
+@router.message(StateFilter(Form.images), F.text == "Надіслати без фото")
 async def submit_without_photos(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
     await finish_submission(message.from_user, state, photos=[])
+
+
+# 🟢 Обробка зображень (усе інше)
+@router.message(StateFilter(Form.images))
+async def get_images(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(
+        f"Користувач {user_id} надіслав повідомлення в стані Form.images: {message.text or 'Фото'}"
+    )
+
+    # Кнопка "Назад"
+    if message.text and message.text.strip() == "⬅️ Назад":
+        logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
+        await show_main_menu(message, state)
+        return
+
+    # Фото
+    if message.photo:
+        data = await state.get_data()
+        photos = data.get("photos", [])
+        photos.append(message.photo[-1].file_id)
+        logging.info(
+            f"Користувач {user_id} надіслав зображення: {message.photo[-1].file_id}"
+        )
+
+        if len(photos) >= 5:
+            await finish_submission(message.from_user, state, photos)
+        else:
+            await state.update_data(photos=photos)
+            await message.answer(
+                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")]
+                    ],
+                    resize_keyboard=True,
+                ),
+            )
+        return
+
+    # Якщо щось інше
+    await message.answer(
+        "⚠️ <b>Будь ласка, надішли зображення або натисни 'Надіслати без фото'.</b>",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Надіслати без фото")],
+                [KeyboardButton(text="/done"), KeyboardButton(text="⬅️ Назад")],
+            ],
+            resize_keyboard=True,
+        ),
+    )
 
 # 🟢 /help
 @router.message(Command("help"))
