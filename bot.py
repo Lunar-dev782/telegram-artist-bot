@@ -934,7 +934,7 @@ async def submit_without_photos(message: Message, state: FSMContext):
     await finish_submission(message.from_user, state, photos=[])
 
 
-# 🟢 Обробка зображень (усе інше)
+# 🟢 Обробка зображень та команд у цьому стані
 @router.message(StateFilter(Form.images))
 async def get_images(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -946,6 +946,28 @@ async def get_images(message: Message, state: FSMContext):
     if message.text and message.text.strip() == "⬅️ Назад":
         logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
         await show_main_menu(message, state)
+        return
+
+    # Кнопка "Надіслати без фото"
+    if message.text and message.text.strip() == "Надіслати без фото":
+        logging.info(f"Користувач {user_id} обрав 'Надіслати без фото'")
+        await finish_submission(message.from_user, state, photos=[])
+        return
+
+    # Команда /done
+    if message.text and message.text.strip().lower() == "/done":
+        data = await state.get_data()
+        photos = data.get("photos", [])
+        category = data.get("category", "")
+
+        if not photos:
+            await message.answer("⚠️ Ви ще не надіслали жодного фото.")
+            return
+
+        logging.info(
+            f"Користувач {user_id} завершив надсилання {len(photos)} фото. Категорія: {category}"
+        )
+        await finish_submission(message.from_user, state, photos)
         return
 
     # Фото
@@ -975,7 +997,7 @@ async def get_images(message: Message, state: FSMContext):
 
     # Якщо щось інше
     await message.answer(
-        "⚠️ <b>Будь ласка, надішли зображення або натисни 'Надіслати без фото'.</b>",
+        "⚠️ <b>Будь ласка, надішли зображення, натисни 'Надіслати без фото' або /done.</b>",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
