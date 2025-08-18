@@ -244,6 +244,20 @@ async def cmd_rules(message: Message, state: FSMContext):
     )
     await state.set_state(Form.main_menu)
 
+
+# 🟢 Глобальний обробник кнопки "Назад"
+@router.message(F.text == "⬅️ Назад")
+async def handle_back(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    logging.info(f"Глобальний обробник: користувач {user_id} натиснув 'Назад'")
+    
+    # завжди очищаємо стан, щоб не залипали попередні анкети
+    await state.clear()
+    
+    # показуємо головне меню
+    await show_main_menu(message, state)
+
+
 # 🟢 Обробка "Запропонувати пост"
 @router.message(Form.main_menu, F.text == "📝 Запропонувати пост")
 async def handle_propose_post(message: Message, state: FSMContext):
