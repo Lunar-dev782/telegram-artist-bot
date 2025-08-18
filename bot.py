@@ -866,48 +866,55 @@ async def get_description_and_socials(message: Message, state: FSMContext):
     user_id = message.from_user.id
     logging.info(f"Користувач {user_id} надіслав анкету: {message.text}")
 
+    # Кнопка Назад
     if message.text and message.text.strip() == "⬅️ Назад":
         logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.description")
+        await state.clear()   # ❗️очищаємо попередні дані
         await show_main_menu(message, state)
         return
 
     if not message.text:
         await message.answer(
-            "⚠️ <b>Будь ласка, надішли опис та соцмережі одним повідомленням.</b>",
+            "⚠️ <b>Будь ласка, надішліть опис та соцмережі одним повідомленням.</b>",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
+                resize_keyboard=True,
+            ),
         )
         return
 
     try:
         description_text = message.text.strip()
-        await state.update_data(raw_description=description_text)
+        # зберігаємо опис і створюємо новий пустий список фото
+        await state.update_data(raw_description=description_text, photos=[])
+
         await message.answer(
             "📸 <b>Надішліть до 5 зображень до вашої заявки (прикріпіть їх до одного повідомлення) або оберіть 'Надіслати без фото'.</b>",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="Надіслати без фото")],
-                    [KeyboardButton(text="⬅️ Назад")]
+                    [KeyboardButton(text="⬅️ Назад")],
                 ],
-                resize_keyboard=True
-            )
+                resize_keyboard=True,
+            ),
         )
         await state.set_state(Form.images)
     except Exception as e:
-        logging.error(f"Помилка обробки повідомлення для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
+        logging.error(
+            f"Помилка обробки повідомлення для user_id={user_id}: {str(e)}\n{traceback.format_exc()}"
+        )
         await message.answer(
             "⚠️ <b>Помилка обробки повідомлення. Спробуй ще раз.</b>",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
-                resize_keyboard=True
-            )
+                resize_keyboard=True,
+            ),
         )
         await state.set_state(Form.images)
+
 
 # 🟢 Завершення надсилання зображень (/done)
 @router.message(StateFilter(Form.images), Command("done"))
@@ -945,6 +952,7 @@ async def get_images(message: Message, state: FSMContext):
     # Кнопка "Назад"
     if message.text and message.text.strip() == "⬅️ Назад":
         logging.info(f"Користувач {user_id} натиснув 'Назад' у стані Form.images")
+        await state.clear()   # ❗️очищаємо попередні фото
         await show_main_menu(message, state)
         return
 
@@ -984,7 +992,7 @@ async def get_images(message: Message, state: FSMContext):
         else:
             await state.update_data(photos=photos)
             await message.answer(
-                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішли ще або натисни /done.</b>",
+                f"📸 <b>Зображення прийнято ({len(photos)}/5). Надішліть ще або натисніть /done.</b>",
                 parse_mode="HTML",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
@@ -997,7 +1005,7 @@ async def get_images(message: Message, state: FSMContext):
 
     # Якщо щось інше
     await message.answer(
-        "⚠️ <b>Будь ласка, надішли зображення, натисни 'Надіслати без фото' або /done.</b>",
+        "⚠️ <b>Будь ласка, надішліть зображення, натисніть 'Надіслати без фото' або /done.</b>",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
@@ -1007,6 +1015,7 @@ async def get_images(message: Message, state: FSMContext):
             resize_keyboard=True,
         ),
     )
+
 
 # 🟢 /help
 @router.message(Command("help"))
