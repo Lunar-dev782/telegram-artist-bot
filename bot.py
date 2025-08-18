@@ -1234,21 +1234,21 @@ async def reject_post(callback: CallbackQuery):
     logging.info(f"Адмін {callback.from_user.id} відхилив заявку для користувача {user_id}, submission_id={submission_id}")
 
     try:
-        logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
-        result = supabase.table("submissions").update({
-            "status": "rejected",
-            "moderated_at": datetime.utcnow().isoformat(),
-            "moderator_id": callback.from_user.id,
-            "rejection_reason": "Невідповідність вимогам"
-        }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result.data}")
-        await callback.message.edit_text("❌ <b>Публікацію відхилено.</b>", parse_mode="HTML")
-        await bot.send_message(user_id, "😔 <b>Вашу публікацію відхилено.</b> Причина: Невідповідність вимогам.", parse_mode="HTML")
+        # ❌ Видаляємо заявку з бази
+        logging.info(f"Видалення заявки з Supabase для user_id={user_id}, submission_id={submission_id}")
+        result = supabase.table("submissions").delete().eq("user_id", user_id).eq("submission_id", submission_id).execute()
+        logging.info(f"Результат видалення Supabase: {result.data}")
+
+        # Повідомляємо адміна і користувача
+        await callback.message.edit_text("❌ <b>Публікацію відхилено та видалено з бази.</b>", parse_mode="HTML")
+        await bot.send_message(user_id, "😔 <b>Вашу публікацію відхилено.</b> Причина: невідповідність вимогам.", parse_mode="HTML")
         await callback.answer()
+
     except Exception as e:
         logging.error(f"Помилка при відхиленні заявки: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при відхиленні заявки. Зверніться до розробника.")
         await callback.answer()
+
 
 # 🟢 Діагностичний обробник callback-запитів
 @router.callback_query()
