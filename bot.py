@@ -239,6 +239,8 @@ async def cmd_rules(message: Message, state: FSMContext):
     "<b>❓ Питання чи скарги?</b> Пиши <code>@AdminUsername</code>\n"
     "<b>🔗 Повна версія правил:</b> <a href='https://t.me/c/2865535470/16'>тут</a>"
 )
+
+    await message.answer(rules_text, parse_mode="HTML")  # ← ось цього рядка бракує
     await state.set_state(Form.main_menu)
 
 
