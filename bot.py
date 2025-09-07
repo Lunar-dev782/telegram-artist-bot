@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s - %(me
 # 🔐 Токен бота
 TOKEN = "8190742713:AAFu6-6hM3C9ZIAho2eNmlYz8drJni61OdM"
 ADMIN_CHAT_ID = -1002802098163
-MAIN_CHAT_ID = -1002865535470
+MAIN_CHAT_ID = -1002440054241
 ADMIN_CONTACTS = ["@Admin1", "@Admin2"]
 
 # 🤖 Ініціалізація бота
@@ -141,7 +141,7 @@ async def show_main_menu(message: Message, state: FSMContext):
         if not subscription_status:
             await message.answer(
                 "⚠️ Ви не підписані на наш канал! Будь ласка, підпишіться за посиланням: "
-                "<a href='https://t.me/+bTmE3LOAMFI5YzBi'>Перейти до каналу</a> і натисніть 'Я підписався(лась)'.",
+                "<a href='https://t.me/mytci_ua'>Перейти до каналу</a> і натисніть 'Я підписався(лась)'.",
                 parse_mode="HTML",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="Я підписався(лась)")]],
