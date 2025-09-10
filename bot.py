@@ -72,74 +72,45 @@ class Form(StatesGroup):
     awaiting_answer = State()
 
 # 📋 Категорії та їх хештеги
-
 CATEGORIES = {
     "⚓️ 💰 Платні послуги": {
-        "description": (
-            "🏴‍☠️ <b>Правила для матросів:</b>\n"
-            "— 18+ — під цензуру, як і в рекламі.\n"
-            "— Репост головного допису <i>обов’язковий</i>.\n"
-            "— Додай прайс-лист (ніяких «потім домовимось»).\n"
-            "— Мінімальна ціна: <b>50 грн</b>.\n"
-            "— Приклади робіт і дедлайни — як карта скарбів!\n"
-            "— Вкажи способи оплати.\n"
-            "— Російські та проросійські фандоми — <u>за борт</u>!"
-        ),
-        "hashtag": "#ТворчіПропозиції"
+        "description": "...",
+        "hashtag": "#ТворчіПропозиції",
+        "repost": True,
+        "anonymous": False
     },
     "🏴‍☠️ 📣 Промо соцмереж": {
-        "description": (
-            "🦜 <b>Зваж на вітер!</b>\n"
-            "— 18+ — ховаємо під цензуру.\n"
-            "— Репост основного оголошення.\n"
-            "— Додай посилання на порт, де стоїть твоя реклама.\n"
-            "— Жодної аморальщини!\n"
-            "— Російська мова та проросійські фандоми — за борт!"
-        ),
-        "hashtag": "#ПромоСоцмереж"
+        "description": "...",
+        "hashtag": "#ПромоСоцмереж",
+        "repost": True,
+        "anonymous": False
     },
     "🦜 🎉 Активності": {
-        "description": (
-            "⚓ <b>Веселись по правилам:</b>\n"
-            "— 18+ — під цензуру.\n"
-            "— Скрін репосту — твій квиток на борт.\n"
-            "— Додай опис, банер і посилання на оригінал.\n"
-            "— Жодної проросійщини та російських фандомів!"
-        ),
-        "hashtag": "#ТворчіАктивності"
+        "description": "...",
+        "hashtag": "#ТворчіАктивності",
+        "repost": False,
+        "anonymous": False
     },
     "🔎 🖋️ У пошуках критики/фідбеку": {
-        "description": (
-            "📜 <b>Карта фідбеку:</b>\n"
-            "— 18+ — під цензуру, ховаємо за парусами.\n"
-            "— Без сторонніх посилань у пості чи коментарях.\n"
-            "— Жодної аморальності чи цькувань.\n"
-            "— Російські та проросійські фандоми — за борт!\n"
-            "— Інформацію перевіряй, не годуй чайок байками."
-        ),
-        "hashtag": "#ПошукФідбеку"
+        "description": "...",
+        "hashtag": "#ПошукФідбеку",
+        "repost": False,
+        "anonymous": True
     },
     "📢 🏴‍☠️ Оголошення": {
-        "description": (
-            "🔔 <b>Дзвін корабельного дзвона:</b>\n"
-            "— Дотримуйся правил безпечної гавані.\n"
-            "— Жодних російських і проросійських фандомів.\n"
-            "— Інформацію підтверджуй фактами.\n"
-            "— Не допускай образ і аморального контенту."
-        ),
-        "hashtag": "#Оголошення"
+        "description": "...",
+        "hashtag": "#Оголошення",
+        "repost": True,
+        "anonymous": False
     },
     "🌟 🧭 Інше": {
-        "description": (
-            "🗺️ <b>Все інше, матросе:</b>\n"
-            "— Дотримуйся загальних правил корабля.\n"
-            "— 18+ — під цензуру.\n"
-            "— Жодної проросійщини та аморальності.\n"
-            "— Якщо сумніваєшся — звернись до модератора."
-        ),
-        "hashtag": "#ТворчийМікс"
+        "description": "...",
+        "hashtag": "#ТворчийМікс",
+        "repost": False,
+        "anonymous": False
     }
 }
+
 
 # 🟢 Фонова задача для видалення старих заявок
 async def cleanup_old_submissions():
@@ -769,6 +740,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
         )
         return
 
+    # Перевірка підписки
     subscription_status = await check_subscription(user_id)
     logging.info(f"Результат перевірки підписки для user_id={user_id}: {subscription_status}")
     if not subscription_status:
@@ -784,13 +756,36 @@ async def handle_category_selection(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # Зберігаємо категорію у стан
     await state.update_data(category=category)
-    if category == "📩 Оголошення":
+    category_config = CATEGORIES[category]
+
+    # 🔹 Якщо потрібен репост
+    if category_config.get("repost", False):
         await message.answer(
-            f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
-            f"📝 <b>Надішли, будь ласка, цю інформацію одним повідомленням:</b>\n\n"
+            f"✅ Ви обрали категорію <b>{category}</b>: {category_config['description']}\n\n"
+            f"🔄 <b>Зроби репост поста нашої</b> <a href='https://t.me/c/2865535470/16'>нашої спільноти</a> "
+            f"у соцмережі або надішли 3 друзям\n"
+            f"📝 <b>Потім заповни анкету</b>\n\n"
+            f"Де ти поділився(лась) інформацією?",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
+                    [KeyboardButton(text="⬅️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(Form.repost_platform)
+
+    # 🔹 Якщо репост НЕ потрібен
+    else:
+        await message.answer(
+            f"✅ Ви обрали категорію <b>{category}</b>: {category_config['description']}\n\n"
+            f"📝 <b>Надішліть одним повідомленням:</b>\n\n"
             f"1. <b>Короткий опис</b>\n"
-            f"2. <b>Лінки на соцмережі</b>\n\n",
+            f"2. <b>Лінки на соцмережі</b>\n",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
@@ -799,23 +794,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
         )
         await state.update_data(repost_platform="", repost_link="")
         await state.set_state(Form.description)
-        return
 
-    await message.answer(
-        f"✅ Ви обрали категорію <b>{category}</b>: {CATEGORIES[category]['description']}\n\n"
-        f"🔄 <b>Зроби репост поста нашої</b> <a href='https://t.me/c/2865535470/16'>нашої спільноти</a> у соцмережі або надішли 3 друзям\n"
-        f"📝 <b>Потім заповни анкету</b>\n\n"
-        f"Де ти поділився(лась) інформацією?",
-        parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Соцмережа"), KeyboardButton(text="Надіслано друзям")],
-                [KeyboardButton(text="⬅️ Назад")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(Form.repost_platform)
 
 # 🟢 Обробка вибору платформи для репосту
 @router.message(Form.repost_platform)
@@ -1203,49 +1182,73 @@ async def approve_post(callback: CallbackQuery):
     logging.info(f"Адмін {callback.from_user.id} схвалив заявку для користувача {user_id}, submission_id={submission_id}")
 
     try:
-        logging.info(f"Перевірка існування заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
-        check_submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).execute()
+        # Перевірка чи існує заявка
+        check_submission = (
+            supabase.table("submissions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("submission_id", submission_id)
+            .execute()
+        )
         if not check_submission.data:
-            logging.error(f"Заявка для user_id={user_id}, submission_id={submission_id} не знайдена в таблиці submissions")
             await callback.message.edit_text("⚠️ Заявку не знайдено в базі даних. Можливо, вона була видалена.")
             await callback.answer()
             return
 
-        logging.info(f"Оновлення статусу заявки в Supabase для user_id={user_id}, submission_id={submission_id}")
-        result = supabase.table("submissions").update({
-            "status": "approved",
-            "moderated_at": datetime.utcnow().isoformat(),
-            "moderator_id": callback.from_user.id
-        }).eq("user_id", user_id).eq("submission_id", submission_id).execute()
-        logging.info(f"Результат оновлення Supabase: {result.data}")
+        # Оновлення статусу заявки
+        result = (
+            supabase.table("submissions")
+            .update({
+                "status": "approved",
+                "moderated_at": datetime.utcnow().isoformat(),
+                "moderator_id": callback.from_user.id
+            })
+            .eq("user_id", user_id)
+            .eq("submission_id", submission_id)
+            .execute()
+        )
 
         if not result.data:
-            logging.warning(f"Оновлення не змінило жодного рядка для user_id={user_id}, submission_id={submission_id}")
             await callback.message.edit_text("⚠️ Не вдалося оновити статус заявки. Перевірте, чи існує заявка.")
             await callback.answer()
             return
 
         await asyncio.sleep(0.5)
-        logging.info(f"Отримання схваленої заявки для user_id={user_id}, submission_id={submission_id}")
-        submission = supabase.table("submissions").select("*").eq("user_id", user_id).eq("submission_id", submission_id).eq("status", "approved").execute()
-        logging.info(f"Отримані дані заявки: {submission.data}")
+
+        # Отримання схваленої заявки
+        submission = (
+            supabase.table("submissions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("submission_id", submission_id)
+            .eq("status", "approved")
+            .execute()
+        )
 
         if not submission.data:
-            logging.error(f"Схвалена заявка для user_id={user_id}, submission_id={submission_id} не знайдена після оновлення")
             await callback.message.edit_text("⚠️ Не вдалося знайти схвалену заявку. Можливо, оновлення статусу не відбулося.")
             await callback.answer()
             return
 
         data = submission.data[0]
-        category_hashtag = CATEGORIES[data['category']]['hashtag']
-        user_display_name = data['username']
-        user_link = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
+        category_config = CATEGORIES[data['category']]
+        category_hashtag = category_config['hashtag']
+
+        # Перевірка на анонімність
+        if category_config.get("anonymous", False):
+            author_text = "Анонім"
+        else:
+            user_display_name = data['username']
+            author_text = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
+
+        # Формування поста
         post_text = (
             f"{category_hashtag}\n\n"
             f"{data['description']}\n\n"
-            f"Автор публікації: {user_link}"
+            f"Автор публікації: {author_text}"
         )
 
+        # Відправка в канал
         if data["images"]:
             media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
             for photo in data["images"][1:]:
@@ -1254,22 +1257,23 @@ async def approve_post(callback: CallbackQuery):
         else:
             await bot.send_message(chat_id=MAIN_CHAT_ID, text=post_text, parse_mode="HTML")
 
+        # Повідомлення адміну та користувачу
         await callback.message.edit_text("✅ <b>Публікацію схвалено та опубліковано в основному чаті!</b>", parse_mode="HTML")
         await bot.send_message(user_id, "🎉 <b>Вашу публікацію схвалено та опубліковано в основному чаті!</b>", parse_mode="HTML")
         await callback.answer()
+
     except TelegramBadRequest as e:
-        logging.error(f"Помилка TelegramBadRequest при публікації в основний чат: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Помилка TelegramBadRequest: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при публікації в основний чат (BadRequest).")
         await callback.answer()
     except TelegramForbiddenError as e:
-        logging.error(f"Помилка TelegramForbiddenError: бот не має доступу до основного чату {MAIN_CHAT_ID}: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Помилка TelegramForbiddenError: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка: бот не має доступу до основного чату.")
         await callback.answer()
     except Exception as e:
-        logging.error(f"Невідома помилка при обробці схвалення: {str(e)}\n{traceback.format_exc()}")
+        logging.error(f"Невідома помилка при схваленні: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
         await callback.answer()
-
 # 🟢 Відхилення посту
 @router.callback_query(lambda c: c.data.startswith("reject:"))
 async def reject_post(callback: CallbackQuery):
