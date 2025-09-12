@@ -807,8 +807,7 @@ async def handle_category_selection(message: Message, state: FSMContext):
     # 🔹 Якщо потрібен репост
     if category_config.get("repost", False):
         await message.answer(
-            f"🦜Скваак! Категорія <b>{category}</b>: {category_config['description']}\n\n"
-            f"<b>----------------------------------</b>\n\n"
+            f"🦜Скваак! Категорія <b>{category}</b>: {category_config['description']}\n"
             f"<b>Де ти поділився(лась) інформацією?</b>\n\n"
             f"<b>----------------------------------</b>\n\n",
             parse_mode="HTML",
