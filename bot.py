@@ -72,7 +72,7 @@ class Form(StatesGroup):
     awaiting_answer = State()
 
 # 📋 Категорії та їх хештеги
-CATEGORIES = {
+CCATEGORIES = {
     "💰 Платні послуги⚓": {
         "description": (
             "🏴‍☠️ <b>Тут матроси виставляють творчі послуги за оплату.</b>\n"
@@ -155,6 +155,15 @@ CATEGORIES = {
     }
 }
 
+# Функція для відправки повідомлення без прев’ю
+def send_category_message(bot, chat_id, category_name):
+    category = CATEGORIES[category_name]
+    bot.send_message(
+        chat_id=chat_id,
+        text=category["description"],
+        parse_mode="HTML",
+        disable_web_page_preview=True  # <-- Вимикаємо прев’ю
+    )
 
 
 # 🟢 Фонова задача для видалення старих заявок
@@ -229,7 +238,7 @@ async def show_main_menu(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Помилка в show_main_menu для user_id={user_id}: {str(e)}\n{traceback.format_exc()}")
         await message.answer(
-            "⚠️ Виникла помилка. Спробуйте ще раз або зверніться до <code>@AdminUsername</code>.",
+            "🦜Виникла помилка. Сквааак! Спробуйте ще раз або зверніться до <code>@tina263678</code>.",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="⬅️ Назад")]],
