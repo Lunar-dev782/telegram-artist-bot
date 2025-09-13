@@ -1147,7 +1147,9 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="✅ Опублікувати", callback_data=f"approve:{user.id}:{submission_id}")
         keyboard.button(text="❌ Відмовити", callback_data=f"reject:{user.id}:{submission_id}")
+        keyboard.button(text="📝 Публікацію вручну", callback_data=f"manual:{user.id}:{submission_id}")
         markup = keyboard.as_markup()
+
 
         await bot.send_message(chat_id=ADMIN_CHAT_ID, text="🔎 <b>Оберіть дію:</b>", parse_mode="HTML", reply_markup=markup)
     except TelegramBadRequest as e:
@@ -1191,13 +1193,52 @@ async def finish_submission(user: types.User, state: FSMContext, photos: list):
             return
 
         logging.info(f"Заявка успішно збережена в Supabase: {result.data}")
-        await bot.send_message(user.id, "✅ <b>Заявка успішно надіслана на перевірку!</b>", parse_mode="HTML")
+        await bot.send_message(user.id, "🦜Сквааак! <b>Заявка успішно надіслана на перевірку!</b>", parse_mode="HTML")
         await state.clear()
     except Exception as e:
         logging.error(f"Помилка при збереженні в Supabase: {str(e)}\n{traceback.format_exc()}")
         await bot.send_message(user.id, f"⚠️ Помилка при збереженні заявки: {str(e)}. Зверніться до <code>@AdminUsername</code>.", parse_mode="HTML")
         await state.clear()
         return
+
+# 🟢 Публікація адміністратором вручну
+@router.callback_query(lambda c: c.data.startswith("manual:"))
+async def manual_post(callback: CallbackQuery):
+    logging.info(f"Callback manual отриманий від адміна {callback.from_user.id}, дані: {callback.data}")
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    submission_id = parts[2]
+
+    try:
+        # ✅ Оновлюємо статус заявки
+        result = (
+            supabase.table("submissions")
+            .update({
+                "status": "manual",
+                "moderated_at": datetime.utcnow().isoformat(),
+                "moderator_id": callback.from_user.id
+            })
+            .eq("user_id", user_id)
+            .eq("submission_id", submission_id)
+            .execute()
+        )
+
+        if not result.data:
+            await callback.message.edit_text("⚠️ Не вдалося оновити статус заявки. Можливо, її вже видалили.")
+            await callback.answer()
+            return
+
+        # ✅ Повідомлення адмінам та юзеру
+        await callback.message.edit_text("📝 <b>Публікація переходить в особистий розгляд.</b>", parse_mode="HTML")
+        await bot.send_message(user_id, "🦜Сквааак! <b>Вашу заявку розглянуто — найближчим часом ми опублікуєм її!</b>", parse_mode="HTML")
+        await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Помилка при виборі 'manual': {str(e)}\n{traceback.format_exc()}")
+        await callback.message.edit_text("⚠️ Помилка при обробці заявки для ручної публікації.")
+        await callback.answer()
+
+
 
 # 🟢 Схвалення посту
 @router.callback_query(lambda c: c.data.startswith("approve:"))
