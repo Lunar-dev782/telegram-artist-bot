@@ -1308,14 +1308,16 @@ async def approve_post(callback: CallbackQuery):
         else:
             user_display_name = data['username']
             author_text = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
+# Підстраховка на випадок None
+description = data.get("description") or "— без опису —"
+category_hashtag = category_config.get("hashtag", "")
 
-        # Формування поста (хештег в кінці)
-       
-        post_text = (
-            f"{data['description']}\n\n"
-            f"<b>Власник цього скарбу</b>: {author_text}\n\n"
-            f"{category_hashtag}"
-        )
+# Формування поста (хештег в кінці)
+post_text = (
+    f"{description}\n\n"
+    f"<b>Власник цього скарбу</b>: {author_text}"
+    + (f"\n\n{category_hashtag}" if category_hashtag else "")
+)
 
 
         # Відправка в канал
