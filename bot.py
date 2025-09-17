@@ -1299,39 +1299,58 @@ async def approve_post(callback: CallbackQuery):
             return
 
         data = submission.data[0]
-        category_config = CATEGORIES[data['category']]
-        category_hashtag = category_config['hashtag']
+        category_config = CATEGORIES.get(data.get('category'), {})
+        category_hashtag = category_config.get('hashtag', "")
 
         # Перевірка на анонімність
         if category_config.get("anonymous", False):
             author_text = "Дірявий Череп"
         else:
-            user_display_name = data['username']
-            author_text = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
-# Підстраховка на випадок None
-description = data.get("description") or "— без опису —"
-category_hashtag = category_config.get("hashtag", "")
+            user_display_name = data.get('username') or "Користувач"
+            author_text = f'<a href="tg://user?id={user_id}">{html.escape(user_display_name)}</a>'
 
-# Формування поста (хештег в кінці)
-post_text = (
-    f"{description}\n\n"
-    f"<b>Власник цього скарбу</b>: {author_text}"
-    + (f"\n\n{category_hashtag}" if category_hashtag else "")
-)
+        # Підстраховка на випадок None
+        description = data.get("description") or "— без опису —"
 
+        # Формування поста (хештег в кінці, якщо є)
+        post_text = f"{description}\n\n<b>Власник цього скарбу</b>: {author_text}"
+        if category_hashtag:
+            post_text += f"\n\n{category_hashtag}"
+
+        # Обмеження Telegram: caption для фото/медіа групи — до ~1024 символів,
+        # а звичайне повідомлення до 4096 символів. Підстрахуємося.
+        if len(post_text) > 4096:
+            logging.warning(f"post_text занадто довгий ({len(post_text)}). Тримаємо максимум 4096 символів.")
+            post_text = post_text[:4093] + "..."
+
+        images = data.get("images") or []
 
         # Відправка в канал
-        if data["images"]:
-            media = [InputMediaPhoto(media=data["images"][0], caption=post_text, parse_mode="HTML")]
-            for photo in data["images"][1:]:
-                media.append(InputMediaPhoto(media=photo))
-            await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+        if images:
+            # Якщо caption помірний — додаємо як caption до першого фото
+            if len(post_text) <= 1024:
+                media = [InputMediaPhoto(media=images[0], caption=post_text, parse_mode="HTML")]
+                for photo in images[1:]:
+                    media.append(InputMediaPhoto(media=photo))
+                await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+            else:
+                # Якщо caption занадто довгий для caption — спочатку відправляємо галерею без підпису,
+                # потім окремим повідомленням текст.
+                media = [InputMediaPhoto(media=images[0])]
+                for photo in images[1:]:
+                    media.append(InputMediaPhoto(media=photo))
+                await bot.send_media_group(chat_id=MAIN_CHAT_ID, media=media)
+                await bot.send_message(chat_id=MAIN_CHAT_ID, text=post_text, parse_mode="HTML")
         else:
             await bot.send_message(chat_id=MAIN_CHAT_ID, text=post_text, parse_mode="HTML")
 
         # Повідомлення адміну та користувачу
         await callback.message.edit_text("🦜Сквааак! Чудові новини <b>Публікацію схвалено та опубліковано в основному чаті!</b>", parse_mode="HTML")
-        await bot.send_message(user_id, "🦜Сквааак! <b>Вашу публікацію схвалено та опубліковано в основному чаті!</b>", parse_mode="HTML")
+        try:
+            await bot.send_message(user_id, "🦜Сквааак! <b>Вашу публікацію схвалено та опубліковано в основному чаті!</b>", parse_mode="HTML")
+        except Exception as send_err:
+            logging.warning(f"Не вдалося надіслати повідомлення користувачу {user_id}: {send_err}")
+
         await callback.answer()
 
     except TelegramBadRequest as e:
@@ -1346,6 +1365,9 @@ post_text = (
         logging.error(f"Невідома помилка при схваленні: {str(e)}\n{traceback.format_exc()}")
         await callback.message.edit_text("⚠️ Помилка при схваленні заявки. Зверніться до розробника.")
         await callback.answer()
+
+
+
 # 🟢 Відхилення посту
 @router.callback_query(lambda c: c.data.startswith("reject:"))
 async def reject_post(callback: CallbackQuery):
