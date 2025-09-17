@@ -1309,12 +1309,14 @@ async def approve_post(callback: CallbackQuery):
             user_display_name = data['username']
             author_text = f'<a href="tg://user?id={user_id}">{user_display_name}</a>'
 
-        # Формування поста
+        # Формування поста (хештег в кінці)
+       
         post_text = (
-            f"{category_hashtag}\n\n"
             f"{data['description']}\n\n"
-            f"<b>Власник цього скарбу</b>: {author_text}"
+            f"<b>Власник цього скарбу</b>: {author_text}\n\n"
+            f"{category_hashtag}"
         )
+
 
         # Відправка в канал
         if data["images"]:
