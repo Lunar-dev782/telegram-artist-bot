@@ -35,6 +35,8 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import Update
+
 
 # Налаштування логування
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s - %(message)s')
@@ -162,6 +164,15 @@ CATEGORIES = {
 }
 
 
+# 🟢 Головне меню клавіатура
+main_menu_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📜 Правила"), KeyboardButton(text="📝 Запропонувати пост")],
+        [KeyboardButton(text="❓ Інші питання")]
+    ],
+    resize_keyboard=True
+)
+
 # 🟢 Фонова задача для видалення старих заявок
 async def cleanup_old_submissions():
     while True:
@@ -241,6 +252,12 @@ async def show_main_menu(message: Message, state: FSMContext):
             reply_markup=main_menu_kb
         )
         await state.set_state(Form.main_menu)
+
+# 🟢 Глобальний error handler
+@dp.errors()
+async def error_handler(update: Update, exception: Exception):
+    logging.error(f"❌ Помилка: {exception}\nUpdate: {update}")
+    return True
 
 # 🟢 Запуск фонової задачі очищення
 async def on_startup():
