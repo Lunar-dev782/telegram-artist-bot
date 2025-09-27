@@ -758,8 +758,11 @@ async def restart_answering(callback: CallbackQuery):
 
 
 # 🟢 Команда /повідомлення для адміна
-@router.message(Command("повідомлення"))
+@router.message(Command(commands=["повідомлення", "msg"]))
+@router.message(F.text.startswith(("/повідомлення", "/msg")))
 async def send_message_to_user(message: Message):
+    ...
+
     admin_id = message.from_user.id
 
     # Перевірка чи є адміном
