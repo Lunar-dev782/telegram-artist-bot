@@ -757,6 +757,52 @@ async def restart_answering(callback: CallbackQuery):
     await send_next_question(callback.from_user.id)
 
 
+# 🟢 Команда /повідомлення для адміна
+@router.message(Command("повідомлення"))
+async def send_message_to_user(message: Message):
+    admin_id = message.from_user.id
+
+    # Перевірка чи є адміном
+    admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+    if not admin_check.data:
+        await message.answer("⚠️ У вас немає доступу до цієї команди.")
+        return
+
+    # Формат: /повідомлення <user_id або @юзернейм> <текст>
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer("⚠️ Використовуйте формат:\n/повідомлення <user_id або @юзернейм> <текст>")
+        return
+
+    target = parts[1]
+    text = parts[2]
+
+    # Якщо ввели @username, треба знайти id користувача
+    target_id = None
+    if target.startswith("@"):
+        try:
+            # Можна пошукати в таблиці submissions чи questions, якщо ти зберігаєш username
+            user_lookup = supabase.table("submissions").select("user_id").eq("username", target.lstrip("@")).execute()
+            if user_lookup.data:
+                target_id = user_lookup.data[0]["user_id"]
+            else:
+                await message.answer("⚠️ Не вдалося знайти користувача з таким username у базі.")
+                return
+        except Exception as e:
+            await message.answer(f"⚠️ Помилка пошуку користувача: {e}")
+            return
+    else:
+        try:
+            target_id = int(target)
+        except ValueError:
+            await message.answer("⚠️ ID користувача має бути числом.")
+            return
+
+    try:
+        await bot.send_message(chat_id=target_id, text=f"📩 Повідомлення від адміністрації:\n\n{text}")
+        await message.answer("✅ Повідомлення успішно надіслано.")
+    except Exception as e:
+        await message.answer(f"⚠️ Не вдалося надіслати повідомлення: {e}")
 
     
   
