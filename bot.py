@@ -761,17 +761,15 @@ async def restart_answering(callback: CallbackQuery):
 @router.message(Command(commands=["повідомлення", "msg"]))
 @router.message(F.text.startswith(("/повідомлення", "/msg")))
 async def send_message_to_user(message: Message):
-    ...
-
     admin_id = message.from_user.id
 
-    # Перевірка чи є адміном
+    # 🔐 Перевірка чи є адміном
     admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
     if not admin_check.data:
         await message.answer("⚠️ У вас немає доступу до цієї команди.")
         return
 
-    # Формат: /повідомлення <user_id або @юзернейм> <текст>
+    # 📌 Формат: /повідомлення <user_id або @юзернейм> <текст>
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
         await message.answer("⚠️ Використовуйте формат:\n/повідомлення <user_id або @юзернейм> <текст>")
@@ -780,16 +778,15 @@ async def send_message_to_user(message: Message):
     target = parts[1]
     text = parts[2]
 
-    # Якщо ввели @username, треба знайти id користувача
+    # 🎯 Якщо ввели @username — шукаємо в таблиці users
     target_id = None
     if target.startswith("@"):
         try:
-            # Можна пошукати в таблиці submissions чи questions, якщо ти зберігаєш username
-            user_lookup = supabase.table("submissions").select("user_id").eq("username", target.lstrip("@")).execute()
+            user_lookup = supabase.table("users").select("user_id").eq("telegram_username", target.lstrip("@")).execute()
             if user_lookup.data:
                 target_id = user_lookup.data[0]["user_id"]
             else:
-                await message.answer("⚠️ Не вдалося знайти користувача з таким username у базі.")
+                await message.answer("⚠️ Не вдалося знайти користувача з таким @username у базі.")
                 return
         except Exception as e:
             await message.answer(f"⚠️ Помилка пошуку користувача: {e}")
@@ -797,16 +794,21 @@ async def send_message_to_user(message: Message):
     else:
         try:
             target_id = int(target)
+            # 🛠 Перевірка чи такий user_id існує у users
+            user_lookup = supabase.table("users").select("user_id").eq("user_id", target_id).execute()
+            if not user_lookup.data:
+                await message.answer("⚠️ У базі немає користувача з таким ID.")
+                return
         except ValueError:
             await message.answer("⚠️ ID користувача має бути числом.")
             return
 
+    # ✉️ Відправка повідомлення
     try:
         await bot.send_message(chat_id=target_id, text=f"📩 Повідомлення від адміністрації:\n\n{text}")
         await message.answer("✅ Повідомлення успішно надіслано.")
     except Exception as e:
         await message.answer(f"⚠️ Не вдалося надіслати повідомлення: {e}")
-
     
   
 # 🟢 Обробка вибору категорії
