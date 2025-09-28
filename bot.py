@@ -265,8 +265,9 @@ async def cmd_start(message: Message, state: FSMContext):
             "user_id": user.id,
             "telegram_username": user.username or None,
             "full_name": user.full_name,
-            "updated_at": datetime.utcnow()
-        }, on_conflict=["user_id"]).execute()
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }, on_conflict=["user_id"]).execute()           
+         
     except Exception as e:
         logging.error(f"Не вдалося зареєструвати користувача {user.id} у таблиці users: {e}")
 
