@@ -757,6 +757,73 @@ async def restart_answering(callback: CallbackQuery):
     await send_next_question(callback.from_user.id)
 
 
+# 🟢 Команда /повідомлення для адміна (підтримує /повідомлення та /msg)
+@router.message(lambda m: m.text and (m.text.startswith("/повідомлення") or m.text.startswith("/msg")))
+async def send_message_to_user(message: Message):
+    admin_id = message.from_user.id
+
+    # 🔐 Перевірка чи є адміном
+    admin_check = supabase.table("admins").select("admin_id").eq("admin_id", admin_id).execute()
+    if not admin_check.data:
+        await message.answer("⚠️ У вас немає доступу до цієї команди.")
+        return
+
+    # Розбір аргументів: /повідомлення <ціль> <текст>
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        # Уникаємо кутових дужок, бо бот має HTML-парсер за замовчуванням
+        await message.answer("⚠️ Використовуйте формат:\n/повідомлення user_id або @юзернейм текст")
+        return
+
+    target = parts[1].strip()
+    text = parts[2].strip()
+    if not text:
+        await message.answer("⚠️ Текст повідомлення не може бути порожнім.")
+        return
+
+    # 🎯 Знаходимо target_id у таблиці users
+    target_id = None
+    try:
+        if target.startswith("@"):
+            username = target.lstrip("@")
+            user_lookup = supabase.table("users").select("user_id").eq("telegram_username", username).execute()
+            if not user_lookup.data:
+                await message.answer("⚠️ Не знайдено користувача з таким @username у базі.")
+                return
+            target_id = user_lookup.data[0]["user_id"]
+        else:
+            # спроба перетворити в int — якщо не число, повертаємо помилку
+            try:
+                target_id = int(target)
+            except ValueError:
+                await message.answer("⚠️ ID користувача має бути числом або @username.")
+                return
+
+            # перевірка наявності в users
+            user_lookup = supabase.table("users").select("user_id").eq("user_id", target_id).execute()
+            if not user_lookup.data:
+                await message.answer("⚠️ У базі немає користувача з таким ID.")
+                return
+    except Exception as e:
+        logging.exception("Помилка при пошуку користувача в таблиці users")
+        await message.answer(f"⚠️ Помилка при пошуку користувача: {e}")
+        return
+
+    # ✉️ Надсилаємо повідомлення — ЕКРАНУЄМО HTML-символи
+    safe_text = html.escape(text)
+    message_to_send = f"📩 <b>Повідомлення від адміністрації:</b>\n\n{safe_text}"
+    try:
+        # явно вказуємо parse_mode="HTML" бо ми вже екранірували текст
+        await bot.send_message(chat_id=target_id, text=message_to_send, parse_mode="HTML")
+        await message.answer("✅ Повідомлення успішно надіслано.")
+    except TelegramForbiddenError:
+        await message.answer("⚠️ Неможливо надіслати повідомлення — користувач заблокував бота або закрив приватні повідомлення.")
+    except TelegramBadRequest as e:
+        logging.exception("TelegramBadRequest при відправці повідомлення")
+        await message.answer(f"⚠️ Помилка при відправці повідомлення: {e}")
+    except Exception as e:
+        logging.exception("Невідома помилка при відправці повідомлення")
+        await message.answer(f"⚠️ Не вдалося надіслати повідомлення: {e}")
 
   
 # 🟢 Обробка вибору категорії
