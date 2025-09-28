@@ -252,19 +252,39 @@ async def show_main_menu(message: Message, state: FSMContext):
 async def on_startup():
     asyncio.create_task(cleanup_old_submissions())
 
+from datetime import datetime
+
 # 🟢 /start
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    user = message.from_user
+
+    # Реєстрація користувача в таблиці users
+    try:
+        supabase.table("users").upsert({
+            "user_id": user.id,
+            "telegram_username": user.username or None,
+            "full_name": user.full_name,
+            "updated_at": datetime.utcnow()
+        }, on_conflict=["user_id"]).execute()
+    except Exception as e:
+        logging.error(f"Не вдалося зареєструвати користувача {user.id} у таблиці users: {e}")
+
     await show_main_menu(message, state)
 
+
+# дубль для тексту "start"
 @router.message(F.text.lower() == "start")
 async def cmd_pochnimo(message: Message, state: FSMContext):
-    await show_main_menu(message, state)
+    await cmd_start(message, state)
+
 
 @router.message(F.text == "Я підписався(лась)")
 async def check_subscription_again(message: Message, state: FSMContext):
-    await show_main_menu(message, state)
-# # 🟢 Обробка /rules або кнопки "📜 Правила"
+    await cmd_start(message, state)
+
+
+ # 🟢 Обробка /rules або кнопки "📜 Правила"
 @router.message(Form.main_menu, F.text == "📜 Правила")
 @router.message(Command("rules"))
 async def cmd_rules(message: Message, state: FSMContext):
