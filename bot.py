@@ -1512,5 +1512,46 @@ async def error_handler(update, exception):
         logging.error(f"Помилка при надсиланні повідомлення про помилку: {str(e)}\n{traceback.format_exc()}")
     return True
 
+# 🟢 Оновлення last_active при кожному повідомленні
+@router.message()
+async def update_last_active(message: Message):
+    try:
+        supabase.table("users").update({
+            "last_active": datetime.utcnow().isoformat()
+        }).eq("user_id", message.from_user.id).execute()
+    except Exception as e:
+        logging.error(f"Не вдалося оновити last_active для {message.from_user.id}: {e}")
+
+
+# 🕓 Перевірка неактивних користувачів
+async def check_inactive_users(bot: Bot):
+    while True:
+        try:
+            # вибираємо юзерів з таблиці users
+            res = supabase.table("users").select("user_id, last_active").execute()
+            for row in res.data:
+                user_id = row["user_id"]
+                last_active = row["last_active"]
+
+                # якщо остання активність старше 24 годин
+                if last_active and (
+                    datetime.utcnow() - datetime.fromisoformat(str(last_active).replace("Z", ""))
+                ).total_seconds() > 86400:
+                    try:
+                        await bot.send_message(
+                            chat_id=user_id,
+                            text="🕓 Діалог завершено.\nЩоб почати нову розмову, натисніть /start"
+                        )
+                        # опціонально: очистити FSM стан
+                        # await dp.storage.clear(user=user_id)
+                    except Exception as e:
+                        logging.error(f"Не вдалося надіслати повідомлення {user_id}: {e}")
+        except Exception as e:
+            logging.error(f"Помилка при перевірці неактивних юзерів: {e}")
+
+        await asyncio.sleep(3600)  # перевіряти щогодини
+
+
+
 # Запуск фонової задачі при старті
 dp.startup.register(on_startup)
